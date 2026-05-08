@@ -105,6 +105,7 @@ function ruleSpecificity(rule = {}) {
   let score = 0;
   if (rule.conversationId) score += 64;
   if (rule.channelId) score += 32;
+  if (rule.guildId) score += 24;
   if (rule.accountId) score += 16;
   if (rule.senderId) score += 8;
   if (typeof rule.isGroup === "boolean") score += 4;

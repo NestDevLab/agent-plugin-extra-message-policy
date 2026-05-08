@@ -75,6 +75,24 @@ test("more specific channel policy wins over broader session policy regardless o
   });
 });
 
+test("channel policy wins over guild policy regardless of order", () => {
+  const cfg = normalizeConfig({
+    policies: [
+      { guildId: "guild-1", respond: false, ingestMode: "all" },
+      { guildId: "guild-1", channelId: "primary-channel", respond: true, ingestMode: "responseCandidates" }
+    ]
+  });
+
+  assert.deepEqual(resolvePolicy(cfg, {}, {
+    guildId: "guild-1",
+    channelId: "primary-channel"
+  }), {
+    respond: true,
+    ingestMode: "responseCandidates",
+    matched: "channelId:primary-channel,guildId:guild-1"
+  });
+});
+
 test("ingest modes map to hook sources", () => {
   assert.equal(shouldIngest({ ingestMode: "none" }, "message_received"), false);
   assert.equal(shouldIngest({ ingestMode: "all" }, "message_received"), true);
