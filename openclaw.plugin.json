@@ -54,7 +54,17 @@
           "maxDays": { "type": "integer", "minimum": 1, "default": 30 },
           "maxMatches": { "type": "integer", "minimum": 1, "default": 12 },
           "maxContextChars": { "type": "integer", "minimum": 500, "default": 6000 },
-          "triggerPhrases": { "type": "array", "items": { "type": "string" } }
+          "triggerPhrases": { "type": "array", "items": { "type": "string" } },
+          "tool": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": { "type": "boolean", "default": true },
+              "maxMatches": { "type": "integer", "minimum": 1, "default": 20 },
+              "maxContextChars": { "type": "integer", "minimum": 500, "default": 12000 },
+              "maxFiles": { "type": "integer", "minimum": 1, "default": 5000 }
+            }
+          }
         }
       },
       "dedupeWindow": {

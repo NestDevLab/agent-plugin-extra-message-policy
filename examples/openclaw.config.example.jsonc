@@ -47,7 +47,13 @@
         "searchOnTriggerOnly": true,
         "maxDays": 30,
         "maxMatches": 12,
-        "maxContextChars": 6000
+        "maxContextChars": 6000,
+        "tool": {
+          "enabled": true,
+          "maxMatches": 20,
+          "maxContextChars": 12000,
+          "maxFiles": 5000
+        }
       }
     }
   }

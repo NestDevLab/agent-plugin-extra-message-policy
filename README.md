@@ -110,9 +110,9 @@ One of:
 
 ## Raw recall
 
-The plugin can also explain the raw archive to the agent and inject small, relevant excerpts at request time.
+The plugin can also explain the raw archive to the agent, inject small relevant excerpts at request time, and expose an on-demand `search_raw_context` tool.
 
-This keeps ingest zero-token: no embedding, no summarization, no LLM call is made when messages arrive. Recall only happens during an actual agent request, and only bounded snippets are added to context.
+This keeps ingest zero-token: no embedding, no summarization, no LLM call is made when messages arrive. Recall only happens during an actual agent request.
 
 ```jsonc
 {
@@ -122,14 +122,24 @@ This keeps ingest zero-token: no embedding, no summarization, no LLM call is mad
     "searchOnTriggerOnly": true,
     "maxDays": 30,
     "maxMatches": 12,
-    "maxContextChars": 6000
+    "maxContextChars": 6000,
+    "tool": {
+      "enabled": true,
+      "maxMatches": 20,
+      "maxContextChars": 12000,
+      "maxFiles": 5000
+    }
   }
 }
 ```
 
+The automatic preflight recall uses `maxDays` as a lookback window, then injects only a bounded result block. It does not inject the whole archive.
+
+For deeper recall, the agent can call `search_raw_context` on demand. By default the tool searches all available JSONL shards under `rawRecall.rootPath`; callers can pass `daysBack`, `conversationId`, `channelId`, or `senderId` to narrow the search.
+
 Example trigger: “Where are we on project X?”
 
-The plugin searches recent local JSONL shards for relevant terms and injects a short `Relevant passive Discord raw-recall excerpts` block.
+The plugin searches local JSONL shards for relevant terms and injects a short `Relevant passive raw-recall excerpts` block.
 
 ## Sinks
 

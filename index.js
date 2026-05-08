@@ -2,7 +2,7 @@ import { mkdir, appendFile } from "node:fs/promises";
 import path from "node:path";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { normalizeConfig, resolvePolicy, shouldIngest, shouldSuppressResponse } from "./policy.js";
-import { buildRawRecallGuidance, searchRawRecall } from "./raw-recall.js";
+import { buildRawRecallGuidance, createRawContextSearchTool, searchRawRecall } from "./raw-recall.js";
 
 function eventMessageId(event = {}, ctx = {}) {
   return String(event.messageId ?? ctx.messageId ?? "");
@@ -133,6 +133,8 @@ export default definePluginEntry({
       seen: new Map(),
       responsePolicy: new Map()
     };
+
+    api.registerTool((toolCtx) => createRawContextSearchTool(cfg.rawRecall, toolCtx), { name: "search_raw_context", optional: true });
 
     api.on("before_agent_start", async (event, ctx) => {
       const appendSystemContext = buildRawRecallGuidance(cfg.rawRecall);
