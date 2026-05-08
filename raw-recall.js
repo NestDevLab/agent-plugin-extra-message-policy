@@ -2,22 +2,10 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 const DEFAULT_STOPWORDS = new Set([
-  "che", "con", "per", "una", "uno", "del", "della", "delle", "degli", "dei", "nel", "nella", "nelle", "sul", "sulla",
-  "siamo", "sono", "come", "cosa", "dove", "quando", "quanto", "quale", "quali", "questo", "questa", "questi", "quelle", "quello",
   "the", "and", "for", "with", "from", "this", "that", "what", "where", "when", "which", "about", "status", "project", "progress"
 ]);
 
 const DEFAULT_TRIGGER_PHRASES = [
-  "a che punto",
-  "a che punto siamo",
-  "stato del progetto",
-  "status del progetto",
-  "progresso",
-  "progressi",
-  "riassumi",
-  "contesto",
-  "cosa abbiamo deciso",
-  "decisioni",
   "recap",
   "summary",
   "where are we",
@@ -47,7 +35,7 @@ export function buildRawRecallGuidance(cfg) {
     "Passive Discord raw ingest is available as local JSONL files.",
     `Archive root: ${root}`,
     "Layout: YYYY/MM/DD/channel_<id>.jsonl (one JSON object per message).",
-    "When the user asks for project status, progress, prior decisions, recent context, monitoring clues, or 'a che punto siamo', treat this archive as an on-demand memory source.",
+    "When the user asks for project status, progress, prior decisions, recent context, or monitoring clues, treat this archive as an on-demand memory source.",
     "Use the injected raw-recall excerpts when present. If more detail is needed and file tools are available, inspect the relevant JSONL shards directly with read/grep/tail before answering.",
     "Do not summarize or index the archive proactively; automatic ingest must remain zero-token. Recall happens only during an actual agent request."
   ].join("\n");

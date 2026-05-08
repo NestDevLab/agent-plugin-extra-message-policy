@@ -127,7 +127,7 @@ This keeps ingest zero-token: no embedding, no summarization, no LLM call is mad
 }
 ```
 
-Example trigger: “A che punto siamo col progetto X?”
+Example trigger: “Where are we on project X?”
 
 The plugin searches recent local JSONL shards for relevant terms and injects a short `Relevant passive Discord raw-recall excerpts` block.
 

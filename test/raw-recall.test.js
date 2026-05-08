@@ -18,8 +18,8 @@ test("raw recall triggers on project-status phrasing and returns matching JSONL 
     })}\n`, "utf8");
 
     const cfg = normalizeRawRecallConfig({ rootPath: tmp, maxDays: 1, maxMatches: 5 }, { path: tmp });
-    assert.equal(shouldSearchRawRecall("A che punto siamo col progetto Phoenix?", cfg), true);
-    const result = await searchRawRecall("A che punto siamo col progetto Phoenix?", cfg, {});
+    assert.equal(shouldSearchRawRecall("Where are we on project Phoenix?", cfg), true);
+    const result = await searchRawRecall("Where are we on project Phoenix?", cfg, {});
     assert.match(result, /Project Phoenix deploy/);
     assert.match(result, /Relevant passive Discord raw-recall excerpts/);
   } finally {
