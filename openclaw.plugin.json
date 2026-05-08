@@ -1,0 +1,100 @@
+{
+  "id": "extra-message-policy",
+  "name": "Extra Message Policy",
+  "description": "Cross-platform message ingest and response policy enforcement.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "defaultPolicy": {
+        "$ref": "#/definitions/policy"
+      },
+      "policies": {
+        "type": "array",
+        "items": { "$ref": "#/definitions/policyRule" },
+        "default": []
+      },
+      "jsonlSink": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean", "default": false },
+          "path": {
+            "type": "string",
+            "default": "runtime/extra-message-policy/messages.jsonl"
+          },
+          "shardBy": {
+            "type": "string",
+            "enum": ["none", "dayConversation"],
+            "default": "none"
+          }
+        }
+      },
+      "httpSink": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean", "default": false },
+          "url": { "type": "string" },
+          "accessToken": { "type": "string" }
+        }
+      },
+      "rawRecall": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "appendGuidance": { "type": "boolean", "default": true },
+          "searchOnTriggerOnly": { "type": "boolean", "default": true },
+          "rootPath": { "type": "string" },
+          "maxDays": { "type": "integer", "minimum": 1, "default": 30 },
+          "maxMatches": { "type": "integer", "minimum": 1, "default": 12 },
+          "maxContextChars": { "type": "integer", "minimum": 500, "default": 6000 },
+          "triggerPhrases": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "dedupeWindow": {
+        "type": "integer",
+        "minimum": 1,
+        "default": 2000
+      }
+    },
+    "definitions": {
+      "policy": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "respond": { "type": "boolean", "default": true },
+          "ingestMode": {
+            "type": "string",
+            "enum": ["none", "all", "responseCandidates"],
+            "default": "responseCandidates"
+          }
+        }
+      },
+      "policyRule": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "respond": { "type": "boolean", "default": true },
+          "ingestMode": {
+            "type": "string",
+            "enum": ["none", "all", "responseCandidates"],
+            "default": "responseCandidates"
+          },
+          "channelId": { "type": "string" },
+          "accountId": { "type": "string" },
+          "conversationId": { "type": "string" },
+          "senderId": { "type": "string" },
+          "isGroup": { "type": "boolean" },
+          "sessionKeyIncludes": { "type": "string" },
+          "sessionKeyRegex": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "plugins": {
+    "extra-message-policy": {
+      "enabled": true,
+      "defaultPolicy": {
+        "respond": true,
+        "ingestMode": "responseCandidates"
+      },
+      "policies": [
+        // Primary response channel: respond + ingest all visible context.
+        {
+          "channelId": "YOUR_RESPONSE_CHANNEL_ID",
+          "respond": true,
+          "ingestMode": "all"
+        },
+
+        // Authorized operator DM: respond + ingest.
+        {
+          "isGroup": false,
+          "senderId": "YOUR_OPERATOR_USER_ID",
+          "respond": true,
+          "ingestMode": "all"
+        },
+
+        // Other Discord channels: ingest visible messages, stay silent.
+        {
+          "sessionKeyIncludes": "discord:channel:",
+          "respond": false,
+          "ingestMode": "all"
+        },
+
+        // Telegram groups/topics: ingest visible messages, stay silent unless a narrower rule above allows responses.
+        {
+          "sessionKeyIncludes": "telegram:",
+          "respond": false,
+          "ingestMode": "all"
+        }
+      ],
+      "jsonlSink": {
+        "enabled": true,
+        "path": "memory/discord/raw",
+        "shardBy": "dayConversation"
+      },
+      "rawRecall": {
+        "enabled": true,
+        "appendGuidance": true,
+        "searchOnTriggerOnly": true,
+        "maxDays": 30,
+        "maxMatches": 12,
+        "maxContextChars": 6000
+      }
+    }
+  }
+}

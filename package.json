@@ -1,0 +1,63 @@
+{
+  "name": "@nestdevlab/openclaw-plugin-extra-message-policy",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "OpenClaw plugin for cross-platform message ingest, response policy, and zero-embedding raw recall.",
+  "openclaw": {
+    "extensions": [
+      "./index.js"
+    ]
+  },
+  "scripts": {
+    "build": "node --check index.js && node --check policy.js && node --check raw-recall.js",
+    "test": "node --test",
+    "lint": "npm run build"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.3.24-beta.2"
+  },
+  "homepage": "https://github.com/NestDevLab/openclaw-plugin-extra-message-policy#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NestDevLab/openclaw-plugin-extra-message-policy.git"
+  },
+  "bugs": {
+    "url": "https://github.com/NestDevLab/openclaw-plugin-extra-message-policy/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "index.js",
+    "policy.js",
+    "raw-recall.js",
+    "openclaw.plugin.json",
+    "README.md",
+    "ROLLOUT.md",
+    "examples",
+    "LICENSE"
+  ],
+  "keywords": [
+    "openclaw",
+    "plugin",
+    "message-policy",
+    "discord",
+    "telegram",
+    "ingest",
+    "raw-recall"
+  ],
+  "author": "NestDevLab",
+  "license": "MIT",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./policy": "./policy.js",
+    "./raw-recall": "./raw-recall.js"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  }
+}
