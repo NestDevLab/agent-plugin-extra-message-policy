@@ -93,6 +93,45 @@ test("channel policy wins over guild policy regardless of order", () => {
   });
 });
 
+test("conversation policy wins over channel policy regardless of order", () => {
+  const cfg = normalizeConfig({
+    policies: [
+      { channelId: "primary-channel", respond: false, ingestMode: "all" },
+      { conversationId: "thread-1", respond: true, ingestMode: "responseCandidates" }
+    ]
+  });
+
+  assert.deepEqual(resolvePolicy(cfg, {}, {
+    channelId: "primary-channel",
+    conversationId: "thread-1"
+  }), {
+    respond: true,
+    ingestMode: "responseCandidates",
+    matched: "conversationId:thread-1"
+  });
+});
+
+test("account policy wins over sender, group, and session policies regardless of order", () => {
+  const cfg = normalizeConfig({
+    policies: [
+      { sessionKeyIncludes: "discord:", respond: false, ingestMode: "all" },
+      { isGroup: true, respond: false, ingestMode: "all" },
+      { senderId: "operator", respond: false, ingestMode: "all" },
+      { accountId: "default", respond: true, ingestMode: "responseCandidates" }
+    ]
+  });
+
+  assert.deepEqual(resolvePolicy(cfg, { isGroup: true, senderId: "operator" }, {
+    accountId: "default",
+    senderId: "operator",
+    sessionKey: "agent:main:discord:channel:primary-channel"
+  }), {
+    respond: true,
+    ingestMode: "responseCandidates",
+    matched: "accountId:default"
+  });
+});
+
 test("ingest modes map to hook sources", () => {
   assert.equal(shouldIngest({ ingestMode: "none" }, "message_received"), false);
   assert.equal(shouldIngest({ ingestMode: "all" }, "message_received"), true);
