@@ -1,6 +1,6 @@
 {
   "name": "@nestdevlab/openclaw-plugin-extra-message-policy",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": false,
   "type": "module",
   "description": "OpenClaw plugin for cross-platform message ingest, response policy, and zero-embedding raw recall.",

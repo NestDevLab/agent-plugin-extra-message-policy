@@ -97,6 +97,7 @@
             "default": "responseCandidates"
           },
           "channelId": { "type": "string" },
+          "guildId": { "type": "string" },
           "accountId": { "type": "string" },
           "conversationId": { "type": "string" },
           "senderId": { "type": "string" },

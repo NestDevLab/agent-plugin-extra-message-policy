@@ -30,6 +30,7 @@ export function normalizePolicyRule(raw = {}, defaultPolicy = DEFAULT_POLICY) {
   return {
     ...normalizePolicy(raw, defaultPolicy),
     channelId: asString(raw.channelId),
+    guildId: asString(raw.guildId),
     accountId: asString(raw.accountId),
     conversationId: asString(raw.conversationId),
     senderId: asString(raw.senderId),
@@ -69,6 +70,7 @@ function ctxValue(ctx = {}, event = {}, key) {
 
 export function ruleMatches(rule, event = {}, ctx = {}) {
   if (rule.channelId && rule.channelId !== ctxValue(ctx, event, "channelId") && rule.channelId !== ctxValue(ctx, event, "channel")) return false;
+  if (rule.guildId && rule.guildId !== ctxValue(ctx, event, "guildId") && rule.guildId !== ctxValue(ctx, event, "guild")) return false;
   if (rule.accountId && rule.accountId !== ctxValue(ctx, event, "accountId")) return false;
   if (rule.conversationId && rule.conversationId !== ctxValue(ctx, event, "conversationId")) return false;
   if (rule.senderId && rule.senderId !== ctxValue(ctx, event, "senderId")) return false;
@@ -92,22 +94,44 @@ export function ruleMatches(rule, event = {}, ctx = {}) {
 
 export function describeRule(rule) {
   const parts = [];
-  for (const key of ["channelId", "accountId", "conversationId", "senderId", "sessionKeyIncludes", "sessionKeyRegex"]) {
+  for (const key of ["channelId", "guildId", "accountId", "conversationId", "senderId", "sessionKeyIncludes", "sessionKeyRegex"]) {
     if (rule[key]) parts.push(`${key}:${rule[key]}`);
   }
   if (typeof rule.isGroup === "boolean") parts.push(`isGroup:${rule.isGroup}`);
   return parts.join(",") || "anonymous-rule";
 }
 
+function ruleSpecificity(rule = {}) {
+  let score = 0;
+  if (rule.conversationId) score += 64;
+  if (rule.channelId) score += 32;
+  if (rule.accountId) score += 16;
+  if (rule.senderId) score += 8;
+  if (typeof rule.isGroup === "boolean") score += 4;
+  if (rule.sessionKeyRegex) score += 2;
+  if (rule.sessionKeyIncludes) score += 1;
+  return score;
+}
+
 export function resolvePolicy(cfg, event = {}, ctx = {}) {
+  let bestRule = null;
+  let bestScore = -1;
+
   for (const rule of cfg.policies) {
-    if (ruleMatches(rule, event, ctx)) {
-      return {
-        respond: rule.respond,
-        ingestMode: rule.ingestMode,
-        matched: describeRule(rule)
-      };
+    if (!ruleMatches(rule, event, ctx)) continue;
+    const score = ruleSpecificity(rule);
+    if (score > bestScore) {
+      bestRule = rule;
+      bestScore = score;
     }
+  }
+
+  if (bestRule) {
+    return {
+      respond: bestRule.respond,
+      ingestMode: bestRule.ingestMode,
+      matched: describeRule(bestRule)
+    };
   }
   return { ...cfg.defaultPolicy, matched: "default" };
 }

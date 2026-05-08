@@ -23,6 +23,27 @@ test("allowing rule by channel overrides default silent policy", () => {
   });
 });
 
+test("guild rules support workspace-wide Discord policy", () => {
+  const cfg = normalizeConfig({
+    defaultPolicy: { respond: true, ingestMode: "all" },
+    policies: [
+      { guildId: "silent-guild", respond: false, ingestMode: "all" }
+    ]
+  });
+
+  assert.deepEqual(resolvePolicy(cfg, {}, { guildId: "silent-guild", channelId: "any-channel" }), {
+    respond: false,
+    ingestMode: "all",
+    matched: "guildId:silent-guild"
+  });
+
+  assert.deepEqual(resolvePolicy(cfg, {}, { guildId: "other-guild", channelId: "any-channel" }), {
+    respond: true,
+    ingestMode: "all",
+    matched: "default"
+  });
+});
+
 test("session rules support platform-wide policies", () => {
   const cfg = normalizeConfig({
     policies: [
@@ -34,6 +55,24 @@ test("session rules support platform-wide policies", () => {
   assert.equal(policy.respond, false);
   assert.equal(policy.ingestMode, "all");
   assert.equal(shouldSuppressResponse(policy), true);
+});
+
+test("more specific channel policy wins over broader session policy regardless of order", () => {
+  const cfg = normalizeConfig({
+    policies: [
+      { sessionKeyIncludes: "discord:channel:", respond: false, ingestMode: "all" },
+      { channelId: "primary-channel", respond: true, ingestMode: "responseCandidates" }
+    ]
+  });
+
+  assert.deepEqual(resolvePolicy(cfg, {}, {
+    channelId: "primary-channel",
+    sessionKey: "agent:main:discord:channel:primary-channel"
+  }), {
+    respond: true,
+    ingestMode: "responseCandidates",
+    matched: "channelId:primary-channel"
+  });
 });
 
 test("ingest modes map to hook sources", () => {

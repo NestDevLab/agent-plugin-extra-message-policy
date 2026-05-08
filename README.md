@@ -83,6 +83,11 @@ One of:
           "ingestMode": "all"
         },
         {
+          "guildId": "YOUR_SILENT_GUILD_ID",
+          "respond": false,
+          "ingestMode": "all"
+        },
+        {
           "sessionKeyIncludes": "discord:channel:",
           "respond": false,
           "ingestMode": "all"
