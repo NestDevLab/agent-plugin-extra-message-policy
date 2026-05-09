@@ -139,30 +139,27 @@ function isApprovalPendingToolResult(event) {
   return looksLikeApprovalPrompt(readToolResultText(event?.result));
 }
 
-function createApprovalPromptToolResultMiddleware(api, approvalPromptHandling) {
-  return (event, ctx) => {
-    if (approvalPromptHandling.mode === "off") return;
-    if (!isApprovalPendingToolResult(event)) return;
+function messageText(message = {}) {
+  if (typeof message.content === "string") return message.content;
+  if (Array.isArray(message.content)) {
+    return message.content
+      .map((part) => part && part.type === "text" && typeof part.text === "string" ? part.text : "")
+      .join("\n");
+  }
+  if (typeof message.text === "string") return message.text;
+  return "";
+}
 
-    api.logger.info(
-      `extra-message-policy: handled approval prompt for ${ctx?.sessionKey ?? "unknown-session"}`
-    );
-
+function replaceMessageText(message = {}, text) {
+  if (typeof message.content === "string") return { ...message, content: text };
+  if (Array.isArray(message.content)) {
     return {
-      result: {
-        ...event.result,
-        content: [{
-          type: "text",
-          text: approvalPromptHandling.replacementText
-        }],
-        details: {
-          status: "approval-managed-out-of-band",
-          toolName: event?.toolName,
-          sessionKey: ctx?.sessionKey
-        }
-      }
+      ...message,
+      content: [{ type: "text", text }]
     };
-  };
+  }
+  if (typeof message.text === "string") return { ...message, text };
+  return { ...message, content: text };
 }
 
 function lookupResponseAllowed(state, ctx = {}) {
@@ -191,8 +188,10 @@ export default definePluginEntry({
     };
 
     if (approvalPromptHandling.mode !== "off") {
-      api.registerAgentToolResultMiddleware(createApprovalPromptToolResultMiddleware(api, approvalPromptHandling), {
-        runtimes: ["pi", "codex"]
+      api.on("tool_result_persist", (event, ctx) => {
+        if (!looksLikeApprovalPrompt(messageText(event?.message))) return;
+        api.logger.info(`extra-message-policy: handled persisted approval prompt for ${ctx?.sessionKey ?? "unknown-session"}`);
+        return { message: replaceMessageText(event.message, approvalPromptHandling.replacementText) };
       });
     }
 
