@@ -15,21 +15,29 @@
       },
       "policies": {
         "type": "array",
-        "items": { "$ref": "#/definitions/policyRule" },
+        "items": {
+          "$ref": "#/definitions/policyRule"
+        },
         "default": []
       },
       "jsonlSink": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "enabled": { "type": "boolean", "default": false },
+          "enabled": {
+            "type": "boolean",
+            "default": false
+          },
           "path": {
             "type": "string",
             "default": "runtime/extra-message-policy/messages.jsonl"
           },
           "shardBy": {
             "type": "string",
-            "enum": ["none", "dayConversation"],
+            "enum": [
+              "none",
+              "dayConversation"
+            ],
             "default": "none"
           }
         }
@@ -38,31 +46,81 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "enabled": { "type": "boolean", "default": false },
-          "url": { "type": "string" },
-          "accessToken": { "type": "string" }
+          "enabled": {
+            "type": "boolean",
+            "default": false
+          },
+          "url": {
+            "type": "string"
+          },
+          "accessToken": {
+            "type": "string"
+          }
         }
       },
       "rawRecall": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "enabled": { "type": "boolean", "default": true },
-          "appendGuidance": { "type": "boolean", "default": true },
-          "searchOnTriggerOnly": { "type": "boolean", "default": true },
-          "rootPath": { "type": "string" },
-          "maxDays": { "type": "integer", "minimum": 1, "default": 30 },
-          "maxMatches": { "type": "integer", "minimum": 1, "default": 12 },
-          "maxContextChars": { "type": "integer", "minimum": 500, "default": 6000 },
-          "triggerPhrases": { "type": "array", "items": { "type": "string" } },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "appendGuidance": {
+            "type": "boolean",
+            "default": true
+          },
+          "searchOnTriggerOnly": {
+            "type": "boolean",
+            "default": true
+          },
+          "rootPath": {
+            "type": "string"
+          },
+          "maxDays": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 30
+          },
+          "maxMatches": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 12
+          },
+          "maxContextChars": {
+            "type": "integer",
+            "minimum": 500,
+            "default": 6000
+          },
+          "triggerPhrases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "tool": {
             "type": "object",
             "additionalProperties": false,
             "properties": {
-              "enabled": { "type": "boolean", "default": true },
-              "maxMatches": { "type": "integer", "minimum": 1, "default": 20 },
-              "maxContextChars": { "type": "integer", "minimum": 500, "default": 12000 },
-              "maxFiles": { "type": "integer", "minimum": 1, "default": 5000 }
+              "enabled": {
+                "type": "boolean",
+                "default": true
+              },
+              "maxMatches": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 20
+              },
+              "maxContextChars": {
+                "type": "integer",
+                "minimum": 500,
+                "default": 12000
+              },
+              "maxFiles": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 5000
+              }
             }
           }
         }
@@ -71,6 +129,24 @@
         "type": "integer",
         "minimum": 1,
         "default": 2000
+      },
+      "approvalPromptHandling": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "off",
+              "cancel",
+              "replace"
+            ],
+            "default": "off"
+          },
+          "replacementText": {
+            "type": "string"
+          }
+        }
       }
     },
     "definitions": {
@@ -78,10 +154,17 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "respond": { "type": "boolean", "default": true },
+          "respond": {
+            "type": "boolean",
+            "default": true
+          },
           "ingestMode": {
             "type": "string",
-            "enum": ["none", "all", "responseCandidates"],
+            "enum": [
+              "none",
+              "all",
+              "responseCandidates"
+            ],
             "default": "responseCandidates"
           }
         }
@@ -90,22 +173,51 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "respond": { "type": "boolean", "default": true },
+          "respond": {
+            "type": "boolean",
+            "default": true
+          },
           "ingestMode": {
             "type": "string",
-            "enum": ["none", "all", "responseCandidates"],
+            "enum": [
+              "none",
+              "all",
+              "responseCandidates"
+            ],
             "default": "responseCandidates"
           },
-          "channelId": { "type": "string" },
-          "guildId": { "type": "string" },
-          "accountId": { "type": "string" },
-          "conversationId": { "type": "string" },
-          "senderId": { "type": "string" },
-          "isGroup": { "type": "boolean" },
-          "sessionKeyIncludes": { "type": "string" },
-          "sessionKeyRegex": { "type": "string" }
+          "channelId": {
+            "type": "string"
+          },
+          "guildId": {
+            "type": "string"
+          },
+          "accountId": {
+            "type": "string"
+          },
+          "conversationId": {
+            "type": "string"
+          },
+          "senderId": {
+            "type": "string"
+          },
+          "isGroup": {
+            "type": "boolean"
+          },
+          "sessionKeyIncludes": {
+            "type": "string"
+          },
+          "sessionKeyRegex": {
+            "type": "string"
+          }
         }
       }
     }
+  },
+  "contracts": {
+    "agentToolResultMiddleware": [
+      "pi",
+      "codex"
+    ]
   }
 }

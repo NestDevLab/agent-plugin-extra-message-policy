@@ -17,7 +17,7 @@ test("raw recall triggers on project-status phrasing and returns matching JSONL 
       metadata: { channelName: "#ops", senderName: "Alice" }
     })}\n`, "utf8");
 
-    const cfg = normalizeRawRecallConfig({ rootPath: tmp, maxDays: 1, maxMatches: 5 }, { path: tmp });
+    const cfg = normalizeRawRecallConfig({ rootPath: tmp, maxDays: 30, maxMatches: 5 }, { path: tmp });
     assert.equal(shouldSearchRawRecall("Where are we on project Phoenix?", cfg), true);
     const result = await searchRawRecall("Where are we on project Phoenix?", cfg, {});
     assert.match(result, /Project Phoenix deploy/);

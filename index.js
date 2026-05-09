@@ -110,6 +110,61 @@ function rememberResponsePolicy(state, event = {}, ctx = {}, policy = {}) {
   }
 }
 
+
+function normalizeApprovalPromptHandling(raw = {}) {
+  const mode = ["off", "cancel", "replace"].includes(raw.mode) ? raw.mode : "off";
+  return {
+    mode,
+    replacementText: typeof raw.replacementText === "string" && raw.replacementText.trim()
+      ? raw.replacementText.trim()
+      : "Approval is being handled out-of-band. Do not ask the user to run approval commands. Respond exactly NO_REPLY unless a later tool or follow-up result needs to be reported."
+  };
+}
+
+function readToolResultText(result) {
+  return Array.isArray(result?.content)
+    ? result.content
+        .map((part) => part && part.type === "text" && typeof part.text === "string" ? part.text : "")
+        .join("\n")
+    : "";
+}
+
+function looksLikeApprovalPrompt(text) {
+  return /(^|\n)Use:\s*\n?`?\/(?:approve|approval)\s+[a-z0-9-]+\b/i.test(String(text || ""))
+    || /approval-pending/i.test(String(text || ""));
+}
+
+function isApprovalPendingToolResult(event) {
+  if (event?.result?.details?.status === "approval-pending") return true;
+  return looksLikeApprovalPrompt(readToolResultText(event?.result));
+}
+
+function createApprovalPromptToolResultMiddleware(api, approvalPromptHandling) {
+  return (event, ctx) => {
+    if (approvalPromptHandling.mode === "off") return;
+    if (!isApprovalPendingToolResult(event)) return;
+
+    api.logger.info(
+      `extra-message-policy: handled approval prompt for ${ctx?.sessionKey ?? "unknown-session"}`
+    );
+
+    return {
+      result: {
+        ...event.result,
+        content: [{
+          type: "text",
+          text: approvalPromptHandling.replacementText
+        }],
+        details: {
+          status: "approval-managed-out-of-band",
+          toolName: event?.toolName,
+          sessionKey: ctx?.sessionKey
+        }
+      }
+    };
+  };
+}
+
 function lookupResponseAllowed(state, ctx = {}) {
   for (const key of [ctx.runId, ctx.sessionKey].filter(Boolean)) {
     const remembered = state.responsePolicy.get(String(key));
@@ -124,6 +179,7 @@ export default definePluginEntry({
   description: "Cross-platform message ingest and response policy enforcement",
   register(api) {
     const cfg = normalizeConfig(api.pluginConfig || {});
+    const approvalPromptHandling = normalizeApprovalPromptHandling(api.pluginConfig?.approvalPromptHandling || {});
     if (!cfg.enabled) {
       api.logger.info("extra-message-policy: disabled");
       return;
@@ -133,6 +189,12 @@ export default definePluginEntry({
       seen: new Map(),
       responsePolicy: new Map()
     };
+
+    if (approvalPromptHandling.mode !== "off") {
+      api.registerAgentToolResultMiddleware(createApprovalPromptToolResultMiddleware(api, approvalPromptHandling), {
+        runtimes: ["pi", "codex"]
+      });
+    }
 
     api.registerTool((toolCtx) => createRawContextSearchTool(cfg.rawRecall, toolCtx), { name: "search_raw_context", optional: true });
 
@@ -162,6 +224,12 @@ export default definePluginEntry({
     });
 
     api.on("message_sending", async (_event, ctx) => {
+      if (approvalPromptHandling.mode !== "off" && looksLikeApprovalPrompt(_event?.content ?? _event?.text ?? _event?.message)) {
+        api.logger.info(`extra-message-policy: canceled outbound approval prompt for ${ctx.sessionKey || ctx.conversationId || ctx.channelId || "unknown"}`);
+        return approvalPromptHandling.mode === "replace"
+          ? { content: approvalPromptHandling.replacementText }
+          : { cancel: true };
+      }
       if (lookupResponseAllowed(state, ctx) === false) return { cancel: true };
     });
   }
