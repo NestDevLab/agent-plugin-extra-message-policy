@@ -147,6 +147,24 @@
             "type": "string"
           }
         }
+      },
+      "directFollowupHandling": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "off",
+              "sanitize-internal",
+              "replace"
+            ],
+            "default": "off"
+          },
+          "replacementText": {
+            "type": "string"
+          }
+        }
       }
     },
     "definitions": {
@@ -166,6 +184,10 @@
               "responseCandidates"
             ],
             "default": "responseCandidates"
+          },
+          "requireMention": {
+            "type": "boolean",
+            "default": false
           }
         }
       },
@@ -209,6 +231,14 @@
           },
           "sessionKeyRegex": {
             "type": "string"
+          },
+          "mentionTextRegex": {
+            "type": "string",
+            "description": "Optional regex fallback used by requireMention when provider mention metadata is unavailable."
+          },
+          "requireMention": {
+            "type": "boolean",
+            "default": false
           }
         }
       }

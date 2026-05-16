@@ -4,7 +4,8 @@ export const INGEST_MODES = Object.freeze(["none", "all", "responseCandidates"])
 
 export const DEFAULT_POLICY = Object.freeze({
   respond: true,
-  ingestMode: "responseCandidates"
+  ingestMode: "responseCandidates",
+  requireMention: false
 });
 
 function asBool(value, fallback) {
@@ -15,14 +16,46 @@ function asString(value, fallback = "") {
   return typeof value === "string" ? value.trim() : fallback;
 }
 
+function messageText(event = {}, ctx = {}) {
+  const metadata = event?.metadata && typeof event.metadata === "object" ? event.metadata : {};
+  for (const value of [
+    event.content,
+    event.text,
+    event.message,
+    event.body,
+    metadata.content,
+    metadata.text,
+    metadata.message,
+    metadata.body,
+    metadata.caption,
+    ctx.content,
+    ctx.text,
+    ctx.message
+  ]) {
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return "";
+}
+
+function regexMatchesText(pattern, text) {
+  if (!pattern || !text) return false;
+  try {
+    return new RegExp(pattern).test(text);
+  } catch {
+    return false;
+  }
+}
+
 export function normalizeIngestMode(value, fallback = DEFAULT_POLICY.ingestMode) {
   return INGEST_MODES.includes(value) ? value : fallback;
 }
 
 export function normalizePolicy(raw = {}, fallback = DEFAULT_POLICY) {
+  const requireMention = asBool(raw.requireMention, fallback.requireMention === true);
   return {
     respond: asBool(raw.respond, fallback.respond),
-    ingestMode: normalizeIngestMode(raw.ingestMode, fallback.ingestMode)
+    ingestMode: normalizeIngestMode(raw.ingestMode, fallback.ingestMode),
+    ...(requireMention ? { requireMention: true } : {})
   };
 }
 
@@ -33,8 +66,11 @@ export function normalizePolicyRule(raw = {}, defaultPolicy = DEFAULT_POLICY) {
     guildId: asString(raw.guildId),
     accountId: asString(raw.accountId),
     conversationId: asString(raw.conversationId),
+    conversationIdPrefix: asString(raw.conversationIdPrefix),
+    conversationIdRegex: asString(raw.conversationIdRegex),
     senderId: asString(raw.senderId),
     isGroup: typeof raw.isGroup === "boolean" ? raw.isGroup : undefined,
+    mentionTextRegex: asString(raw.mentionTextRegex),
     sessionKeyIncludes: asString(raw.sessionKeyIncludes),
     sessionKeyRegex: asString(raw.sessionKeyRegex)
   };
@@ -68,11 +104,47 @@ function ctxValue(ctx = {}, event = {}, key) {
   return String(ctx?.[key] ?? event?.[key] ?? "");
 }
 
+function stripConversationPrefix(value) {
+  return String(value || "").replace(/^(channel|chat|user):/, "");
+}
+
+function conversationValues(ctx = {}, event = {}) {
+  const values = new Set();
+  for (const value of [
+    ctx?.conversationId,
+    event?.conversationId,
+    event?.metadata?.to,
+    event?.metadata?.originatingTo,
+    event?.metadata?.threadId,
+    ctx?.threadId,
+    event?.threadId
+  ]) {
+    const text = String(value || "").trim();
+    if (!text) continue;
+    values.add(text);
+    values.add(stripConversationPrefix(text));
+  }
+  return [...values];
+}
+
+function anyConversationMatches(ctx, event, predicate) {
+  return conversationValues(ctx, event).some(predicate);
+}
+
 export function ruleMatches(rule, event = {}, ctx = {}) {
   if (rule.channelId && rule.channelId !== ctxValue(ctx, event, "channelId") && rule.channelId !== ctxValue(ctx, event, "channel")) return false;
-  if (rule.guildId && rule.guildId !== ctxValue(ctx, event, "guildId") && rule.guildId !== ctxValue(ctx, event, "guild")) return false;
+  if (rule.guildId && rule.guildId !== ctxValue(ctx, event, "guildId") && rule.guildId !== ctxValue(ctx, event, "guild") && rule.guildId !== String(event?.metadata?.guildId ?? "")) return false;
   if (rule.accountId && rule.accountId !== ctxValue(ctx, event, "accountId")) return false;
-  if (rule.conversationId && rule.conversationId !== ctxValue(ctx, event, "conversationId")) return false;
+  if (rule.conversationId && !anyConversationMatches(ctx, event, (value) => value === rule.conversationId || stripConversationPrefix(value) === stripConversationPrefix(rule.conversationId))) return false;
+  if (rule.conversationIdPrefix && !anyConversationMatches(ctx, event, (value) => value.startsWith(rule.conversationIdPrefix))) return false;
+  if (rule.conversationIdRegex) {
+    try {
+      const re = new RegExp(rule.conversationIdRegex);
+      if (!anyConversationMatches(ctx, event, (value) => re.test(value))) return false;
+    } catch {
+      return false;
+    }
+  }
   if (rule.senderId && rule.senderId !== ctxValue(ctx, event, "senderId")) return false;
   if (typeof rule.isGroup === "boolean") {
     const value = event?.isGroup;
@@ -94,7 +166,7 @@ export function ruleMatches(rule, event = {}, ctx = {}) {
 
 export function describeRule(rule) {
   const parts = [];
-  for (const key of ["channelId", "guildId", "accountId", "conversationId", "senderId", "sessionKeyIncludes", "sessionKeyRegex"]) {
+  for (const key of ["channelId", "guildId", "accountId", "conversationId", "conversationIdPrefix", "conversationIdRegex", "senderId", "mentionTextRegex", "sessionKeyIncludes", "sessionKeyRegex"]) {
     if (rule[key]) parts.push(`${key}:${rule[key]}`);
   }
   if (typeof rule.isGroup === "boolean") parts.push(`isGroup:${rule.isGroup}`);
@@ -104,6 +176,8 @@ export function describeRule(rule) {
 function ruleSpecificity(rule = {}) {
   let score = 0;
   if (rule.conversationId) score += 64;
+  if (rule.conversationIdRegex) score += 60;
+  if (rule.conversationIdPrefix) score += 56;
   if (rule.channelId) score += 32;
   if (rule.guildId) score += 24;
   if (rule.accountId) score += 16;
@@ -112,6 +186,50 @@ function ruleSpecificity(rule = {}) {
   if (rule.sessionKeyRegex) score += 2;
   if (rule.sessionKeyIncludes) score += 1;
   return score;
+}
+
+function firstBoolean(...values) {
+  for (const value of values) {
+    if (typeof value === "boolean") return value;
+  }
+  return undefined;
+}
+
+function nestedValue(obj, path) {
+  let cursor = obj;
+  for (const key of path) {
+    if (!cursor || typeof cursor !== "object" || !(key in cursor)) return undefined;
+    cursor = cursor[key];
+  }
+  return cursor;
+}
+
+export function wasMentioned(event = {}, ctx = {}, policy = {}) {
+  const metadata = event?.metadata && typeof event.metadata === "object" ? event.metadata : {};
+  const explicit = firstBoolean(
+    event.wasMentioned,
+    ctx.wasMentioned,
+    metadata.wasMentioned,
+    metadata.mentioned,
+    nestedValue(metadata, ["mention", "wasMentioned"]),
+    nestedValue(metadata, ["mentions", "wasMentioned"]),
+    nestedValue(metadata, ["discord", "wasMentioned"]),
+    nestedValue(metadata, ["message", "wasMentioned"])
+  );
+  if (typeof explicit === "boolean") return explicit;
+  if (regexMatchesText(policy.mentionTextRegex, messageText(event, ctx))) return true;
+  return undefined;
+}
+
+function withMentionDecision(policy, event = {}, ctx = {}) {
+  if (!policy.requireMention) return policy;
+  const mentioned = wasMentioned(event, ctx, policy) === true;
+  return {
+    ...policy,
+    mentionRequired: true,
+    mentionSatisfied: mentioned,
+    respond: policy.respond && mentioned
+  };
 }
 
 export function resolvePolicy(cfg, event = {}, ctx = {}) {
@@ -128,13 +246,15 @@ export function resolvePolicy(cfg, event = {}, ctx = {}) {
   }
 
   if (bestRule) {
-    return {
+    return withMentionDecision({
       respond: bestRule.respond,
       ingestMode: bestRule.ingestMode,
+      ...(bestRule.requireMention ? { requireMention: true } : {}),
+      ...(bestRule.mentionTextRegex ? { mentionTextRegex: bestRule.mentionTextRegex } : {}),
       matched: describeRule(bestRule)
-    };
+    }, event, ctx);
   }
-  return { ...cfg.defaultPolicy, matched: "default" };
+  return withMentionDecision({ ...cfg.defaultPolicy, matched: "default" }, event, ctx);
 }
 
 export function shouldIngest(policy, source) {
@@ -144,5 +264,5 @@ export function shouldIngest(policy, source) {
 }
 
 export function shouldSuppressResponse(policy) {
-  return policy?.respond === false;
+  return policy?.respond === false || (policy?.requireMention === true && policy?.mentionSatisfied === false);
 }
