@@ -13,7 +13,7 @@ test("plugin metadata uses the neutral extra-message-policy name", () => {
 
 test("schema exposes response and ingest policy", () => {
   const policyRule = manifest.configSchema.definitions.policyRule.properties;
-  assert.deepEqual(policyRule.ingestMode.enum, ["none", "all", "responseCandidates"]);
+  assert.deepEqual(policyRule.ingestMode.enum, ["none", "passive", "all", "responseCandidates"]);
   assert.equal(policyRule.respond.type, "boolean");
   assert.deepEqual(manifest.configSchema.properties.jsonlSink.properties.shardBy.enum, ["none", "dayConversation"]);
 });

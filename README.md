@@ -62,8 +62,31 @@ When `false`, inbound messages can still be ingested, but the plugin marks the d
 One of:
 
 - `none` — do not ingest.
+- `passive` — ingest only passive `message_received` events.
 - `responseCandidates` — ingest only messages that reached `before_dispatch`, i.e. messages native routing would consider for response.
 - `all` — ingest messages observed by `message_received`, i.e. all messages OpenClaw exposes to plugin hooks after allow-list/platform read checks.
+
+## Runtime Policy Command
+
+The plugin exposes one central command, `/policy`, for runtime response and ingest controls. On Discord, `/policy` and `/policy status` open an interactive panel with buttons for the current channel/thread scope:
+
+```text
+/policy status
+/policy response off|mention|always|toggle
+/policy ingest off|passive|responseCandidates|all|toggle
+/policy native on|off
+/policy reset
+```
+
+The text subcommands remain available as a fallback, but the normal Discord workflow is button-driven: change runtime response, runtime ingest, permanent native mention config, refresh the panel, reset runtime overrides, or dismiss the panel without typing command arguments.
+
+Runtime `response` and `ingest` subcommands write plugin state, not OpenClaw config. They should not force a gateway config reload or Discord reconnect.
+
+`/policy native on|off` is the explicit replacement for the old `/require_mention on|off` command. It writes permanent OpenClaw Discord `requireMention` config for the current channel/thread, so it may require reload/restart or trigger provider reconnect.
+
+When `response mention` is active, the plugin first uses provider mention metadata. If the runtime hook does not expose that metadata, `mentionDetection` can provide fallback Discord bot IDs, names, or regex patterns per account.
+
+This command shape follows the preferred custom-plugin convention: one top-level command per plugin, with subcommands for related behavior.
 
 ## Example
 
@@ -107,6 +130,14 @@ One of:
       "jsonlSink": {
         "enabled": true,
         "path": "runtime/extra-message-policy/messages.jsonl"
+      },
+      "mentionDetection": {
+        "accounts": {
+          "default": {
+            "botIds": ["YOUR_DISCORD_BOT_USER_ID"],
+            "names": ["Your Bot Name"]
+          }
+        }
       }
     }
   }

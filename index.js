@@ -1,8 +1,33 @@
 import { mkdir, appendFile } from "node:fs/promises";
 import path from "node:path";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+import { buildDiscordComponentMessage, registerBuiltDiscordComponentMessage } from "openclaw/plugin-sdk/discord";
 import { normalizeConfig, resolvePolicy, shouldIngest, shouldSuppressResponse } from "./policy.js";
+import {
+  applyNativeRequireMentionCommand,
+  applyRuntimeCommand,
+  applyRuntimePolicy,
+  buildPolicyDashboardView,
+  contextFromPolicyScope,
+  defaultPolicyStatePath,
+  loadPolicyState,
+  normalizePolicyCommandConfig,
+  parsePolicyDashboardAction,
+  parsePolicyCommand,
+  renderPolicyHelp,
+  renderPolicyStatus,
+  renderNativeRequireMentionStatus,
+  resolveNativeRequireMentionStatus,
+  resolveRuntimePolicyOverride,
+  savePolicyState,
+  validateRuntimeResponseAction
+} from "./policy-command.js";
 import { buildRawRecallGuidance, createRawContextSearchTool, searchRawRecall } from "./raw-recall.js";
+import {
+  forceMentionedDispatchContext,
+  rememberMentionFact,
+  withDerivedMentionFact
+} from "./runtime-context.js";
 
 function eventMessageId(event = {}, ctx = {}) {
   return String(event.messageId ?? ctx.messageId ?? "");
@@ -170,12 +195,113 @@ function lookupResponseAllowed(state, ctx = {}) {
   return true;
 }
 
+function commandNameFrom(event = {}, ctx = {}) {
+  return String(
+    ctx.commandName
+    ?? event.commandName
+    ?? event.metadata?.commandName
+    ?? event.metadata?.command
+    ?? ""
+  ).replace(/^\//, "");
+}
+
+function textFrom(event = {}, ctx = {}) {
+  return String(event.content ?? event.text ?? event.body ?? ctx.content ?? ctx.text ?? "");
+}
+
+function isPolicyCommand(commandConfig, event = {}, ctx = {}) {
+  const name = commandNameFrom(event, ctx);
+  if (name && name === commandConfig.commandName) return true;
+  return textFrom(event, ctx).trim().startsWith(`/${commandConfig.commandName}`);
+}
+
+function commandEventFromContext(ctx = {}) {
+  return {
+    accountId: ctx?.accountId,
+    guildId: ctx?.guildId || ctx?.rawGuildId,
+    channelId: ctx?.channelId,
+    conversationId: ctx?.conversationId || ctx?.to || ctx?.target,
+    metadata: ctx?.metadata || {}
+  };
+}
+
+function buildDashboardComponents(view, ctx = {}) {
+  if (!view?.componentSpec) return [];
+  const buildResult = buildDiscordComponentMessage({
+    spec: view.componentSpec,
+    fallbackText: view.text,
+    sessionKey: ctx?.sessionKey,
+    agentId: ctx?.agentId,
+    accountId: ctx?.accountId
+  });
+  registerBuiltDiscordComponentMessage({ buildResult });
+  return buildResult.components;
+}
+
+function dashboardReply(view, ctx = {}) {
+  const components = buildDashboardComponents(view, ctx);
+  return {
+    channelData: {
+      discord: {
+        components
+      }
+    }
+  };
+}
+
+function dispatchPolicyContext(ctx = {}) {
+  return {
+    accountId: ctx.AccountId || ctx.accountId,
+    guildId: ctx.GroupSpace || ctx.guildId || ctx.rawGuildId,
+    rawGuildId: ctx.GroupSpace || ctx.rawGuildId || ctx.guildId,
+    channelId: ctx.NativeChannelId || ctx.ChannelId || ctx.channelId,
+    conversationId: ctx.OriginatingTo || ctx.To || ctx.conversationId,
+    sessionKey: ctx.SessionKey || ctx.sessionKey,
+    senderId: ctx.SenderId || ctx.senderId,
+    wasMentioned: ctx.WasMentioned,
+    metadata: {
+      accountId: ctx.AccountId || ctx.accountId,
+      guildId: ctx.GroupSpace || ctx.guildId,
+      channelId: ctx.NativeChannelId || ctx.ChannelId || ctx.channelId,
+      to: ctx.OriginatingTo || ctx.To
+    }
+  };
+}
+
+function dispatchPolicyEvent(ctx = {}) {
+  return {
+    content: ctx.BodyForAgent || ctx.Body || ctx.content,
+    body: ctx.BodyForAgent || ctx.Body || ctx.body,
+    accountId: ctx.AccountId,
+    guildId: ctx.GroupSpace,
+    channelId: ctx.NativeChannelId || ctx.ChannelId,
+    conversationId: ctx.OriginatingTo || ctx.To,
+    sessionKey: ctx.SessionKey,
+    senderId: ctx.SenderId,
+    wasMentioned: ctx.WasMentioned,
+    metadata: {
+      accountId: ctx.AccountId,
+      guildId: ctx.GroupSpace,
+      channelId: ctx.NativeChannelId || ctx.ChannelId,
+      to: ctx.OriginatingTo || ctx.To
+    }
+  };
+}
+
+function shouldForceReplyContext(policy = {}) {
+  return policy.respond !== false
+    && policy.runtimeResponseMode === "always"
+    && policy.requireMention !== true;
+}
+
 export default definePluginEntry({
   id: "extra-message-policy",
   name: "Extra Message Policy",
   description: "Cross-platform message ingest and response policy enforcement",
   register(api) {
     const cfg = normalizeConfig(api.pluginConfig || {});
+    const commandConfig = normalizePolicyCommandConfig(api.pluginConfig || {});
+    const policyStatePath = defaultPolicyStatePath(api, commandConfig);
     const approvalPromptHandling = normalizeApprovalPromptHandling(api.pluginConfig?.approvalPromptHandling || {});
     if (!cfg.enabled) {
       api.logger.info("extra-message-policy: disabled");
@@ -184,8 +310,131 @@ export default definePluginEntry({
 
     const state = {
       seen: new Map(),
-      responsePolicy: new Map()
+      responsePolicy: new Map(),
+      mentionFacts: new Map()
     };
+
+    const resolveEffectivePolicy = async (event = {}, ctx = {}) => {
+      const enriched = withDerivedMentionFact(
+        state,
+        event,
+        ctx,
+        api.runtime?.config?.current?.() || api.config || {},
+        api.pluginConfig || {}
+      );
+      const basePolicy = resolvePolicy(cfg, enriched.event, enriched.ctx);
+      const runtimeState = await loadPolicyState(policyStatePath);
+      const runtimeOverride = resolveRuntimePolicyOverride(commandConfig, runtimeState, enriched.event, enriched.ctx);
+      return runtimeOverride ? applyRuntimePolicy(basePolicy, runtimeOverride, enriched.event, enriched.ctx) : basePolicy;
+    };
+
+    if (commandConfig.enabled) {
+      const buildDashboard = async (ctx = {}, currentState = null, nativeConfig = null, options = {}) => {
+        const event = commandEventFromContext(ctx);
+        const loadedState = currentState || await loadPolicyState(policyStatePath);
+        const basePolicy = resolvePolicy(cfg, event, ctx);
+        const runtimeOverride = resolveRuntimePolicyOverride(commandConfig, loadedState, event, ctx);
+        const effectivePolicy = runtimeOverride ? applyRuntimePolicy(basePolicy, runtimeOverride, event, ctx) : basePolicy;
+        const scope = runtimeOverride?.runtimeScope || resolveRuntimePolicyOverride(
+          { ...commandConfig, applyDefault: true },
+          loadedState,
+          event,
+          ctx
+        )?.runtimeScope;
+        let nativeStatus = null;
+        try {
+          nativeStatus = resolveNativeRequireMentionStatus(ctx || {}, nativeConfig || api.runtime?.config?.current?.() || api.config || {});
+        } catch {
+          nativeStatus = null;
+        }
+        return buildPolicyDashboardView({
+          effectivePolicy,
+          runtimeOverride,
+          scope,
+          nativeStatus,
+          actorId: ctx?.senderId,
+          details: options.details === true,
+          panelStatePath: policyStatePath,
+          notice: options.notice || ""
+        });
+      };
+
+      const runPolicyAction = async (ctx = {}, command, options = {}) => {
+        const effectiveCtx = command.scope ? contextFromPolicyScope(command.scope, ctx || {}) : (ctx || {});
+        const currentState = await loadPolicyState(policyStatePath);
+
+        if (command.action === "set-native-require") {
+          const nativeResult = await applyNativeRequireMentionCommand(effectiveCtx, command.value);
+          if (nativeResult?.target) {
+            return dashboardReply(await buildDashboard(effectiveCtx, currentState, nativeResult.nextConfig), effectiveCtx);
+          }
+          return { text: nativeResult?.text || renderPolicyHelp(commandConfig.commandName) };
+        }
+
+        if (command.action === "status" || command.action === "details") {
+          return dashboardReply(await buildDashboard(effectiveCtx, currentState, null, { details: command.details === true }), effectiveCtx);
+        }
+
+        if (command.action === "reset" || command.action === "set-response" || command.action === "set-ingest") {
+          if (command.action === "set-response") {
+            let nativeStatus = null;
+            try {
+              nativeStatus = resolveNativeRequireMentionStatus(effectiveCtx, api.runtime?.config?.current?.() || api.config || {});
+            } catch {
+              nativeStatus = null;
+            }
+            const validation = validateRuntimeResponseAction(command, nativeStatus);
+            if (!validation.ok) {
+              return dashboardReply(await buildDashboard(effectiveCtx, currentState, null, { notice: validation.message }), effectiveCtx);
+            }
+          }
+          const result = applyRuntimeCommand(
+            commandConfig,
+            currentState,
+            commandEventFromContext(effectiveCtx),
+            effectiveCtx,
+            command,
+            effectiveCtx?.senderId
+          );
+          await savePolicyState(policyStatePath, result.state);
+          return dashboardReply(await buildDashboard(effectiveCtx, result.state), effectiveCtx);
+        }
+
+        return options.allowHelp ? { text: renderPolicyHelp(commandConfig.commandName) } : dashboardReply(await buildDashboard(effectiveCtx, currentState), effectiveCtx);
+      };
+
+      api.registerCommand({
+        name: commandConfig.commandName,
+        nativeNames: { default: commandConfig.commandName },
+        description: "Show or change response, ingest, and native mention policy for this chat.",
+        acceptsArgs: true,
+        requireAuth: true,
+        handler: async (ctx) => {
+          const command = parsePolicyCommand(ctx?.args || "");
+          if (command.action === "help") return { text: renderPolicyHelp(commandConfig.commandName) };
+          return await runPolicyAction(ctx || {}, command, { allowHelp: true });
+        }
+      });
+
+      api.registerInteractiveHandler?.({
+        channel: "discord",
+        namespace: "policy",
+        handler: async (ctx) => {
+          const command = parsePolicyDashboardAction(ctx?.interaction?.payload || "status");
+          const effectiveCtx = command.scope ? contextFromPolicyScope(command.scope, ctx || {}) : (ctx || {});
+          if (command.action === "dismiss") {
+            await ctx.respond?.clearComponents?.({ text: "Policy panel dismissed." });
+            return { handled: true };
+          }
+          const result = await runPolicyAction(effectiveCtx, command);
+          await ctx.respond?.editMessage?.({
+            text: result.text,
+            components: result.channelData?.discord?.components || []
+          });
+          return { handled: true };
+        }
+      });
+    }
 
     if (approvalPromptHandling.mode !== "off") {
       api.on("tool_result_persist", (event, ctx) => {
@@ -206,13 +455,20 @@ export default definePluginEntry({
       if (appendSystemContext || prependContext) return { appendSystemContext, prependContext };
     });
 
+    api.on("inbound_claim", async (event, ctx) => {
+      if (isPolicyCommand(commandConfig, event, ctx)) return;
+      rememberMentionFact(state, event, ctx);
+    });
+
     api.on("message_received", async (event, ctx) => {
-      const policy = resolvePolicy(cfg, event, ctx);
+      if (isPolicyCommand(commandConfig, event, ctx)) return;
+      const policy = await resolveEffectivePolicy(event, ctx);
       await ingest(api, cfg, state, "message_received", event, ctx, policy);
     });
 
     api.on("before_dispatch", async (event, ctx) => {
-      const policy = resolvePolicy(cfg, event, ctx);
+      if (isPolicyCommand(commandConfig, event, ctx)) return;
+      const policy = await resolveEffectivePolicy(event, ctx);
       rememberResponsePolicy(state, event, ctx, policy);
       await ingest(api, cfg, state, "before_dispatch", event, ctx, policy);
 
@@ -220,6 +476,15 @@ export default definePluginEntry({
         api.logger.info(`extra-message-policy: suppressed response for ${ctx.sessionKey || ctx.conversationId || ctx.channelId || "unknown"}`);
         return { handled: true };
       }
+    });
+
+    api.on("reply_dispatch", async (event) => {
+      const dispatchCtx = event?.ctx || {};
+      if (isPolicyCommand(commandConfig, dispatchPolicyEvent(dispatchCtx), dispatchPolicyContext(dispatchCtx))) return;
+      const policy = await resolveEffectivePolicy(dispatchPolicyEvent(dispatchCtx), dispatchPolicyContext(dispatchCtx));
+      if (!shouldForceReplyContext(policy)) return;
+      forceMentionedDispatchContext(dispatchCtx);
+      api.logger.info(`extra-message-policy: forced reply context for ${dispatchCtx.SessionKey || dispatchCtx.OriginatingTo || dispatchCtx.To || "unknown"}`);
     });
 
     api.on("message_sending", async (_event, ctx) => {

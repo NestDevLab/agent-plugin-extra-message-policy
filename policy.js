@@ -1,6 +1,6 @@
 import { normalizeRawRecallConfig } from "./raw-recall.js";
 
-export const INGEST_MODES = Object.freeze(["none", "all", "responseCandidates"]);
+export const INGEST_MODES = Object.freeze(["none", "passive", "all", "responseCandidates"]);
 
 export const DEFAULT_POLICY = Object.freeze({
   respond: true,
@@ -259,6 +259,7 @@ export function resolvePolicy(cfg, event = {}, ctx = {}) {
 
 export function shouldIngest(policy, source) {
   if (!policy || policy.ingestMode === "none") return false;
+  if (policy.ingestMode === "passive") return source === "message_received";
   if (policy.ingestMode === "all") return source === "message_received" || source === "before_dispatch";
   return policy.ingestMode === "responseCandidates" && source === "before_dispatch";
 }

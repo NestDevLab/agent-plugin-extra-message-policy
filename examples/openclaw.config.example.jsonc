@@ -48,6 +48,23 @@
         "path": "memory/discord/raw",
         "shardBy": "dayConversation"
       },
+      "policyCommand": {
+        "enabled": true,
+        "commandName": "policy",
+        "applyDefault": false,
+        "defaultPolicy": {
+          "responseMode": "off",
+          "ingestMode": "off"
+        }
+      },
+      "mentionDetection": {
+        "accounts": {
+          "default": {
+            "botIds": ["YOUR_DISCORD_BOT_USER_ID"],
+            "names": ["Your Bot Name"]
+          }
+        }
+      },
       "rawRecall": {
         "enabled": true,
         "appendGuidance": true,

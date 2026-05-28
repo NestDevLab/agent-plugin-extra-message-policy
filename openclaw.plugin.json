@@ -2,6 +2,9 @@
   "id": "extra-message-policy",
   "name": "Extra Message Policy",
   "description": "Cross-platform message ingest and response policy enforcement.",
+  "activation": {
+    "onStartup": true
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -130,6 +133,67 @@
         "minimum": 1,
         "default": 2000
       },
+      "mentionDetection": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Optional fallback mention metadata used when a runtime hook does not expose provider wasMentioned flags.",
+        "properties": {
+          "botIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "botUserIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "applicationIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "clientIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "botNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "patterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "mentionPatterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "accounts": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/definitions/mentionDetectionAccount"
+            }
+          }
+        }
+      },
       "approvalPromptHandling": {
         "type": "object",
         "additionalProperties": false,
@@ -165,9 +229,112 @@
             "type": "string"
           }
         }
+      },
+      "policyCommand": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "commandName": {
+            "type": "string",
+            "default": "policy"
+          },
+          "applyDefault": {
+            "type": "boolean",
+            "default": false
+          },
+          "statePath": {
+            "type": "string"
+          },
+          "defaultPolicy": {
+            "$ref": "#/definitions/runtimePolicy"
+          }
+        }
       }
     },
     "definitions": {
+      "runtimePolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "responseMode": {
+            "type": "string",
+            "enum": [
+              "off",
+              "mention",
+              "always"
+            ],
+            "default": "off"
+          },
+          "ingestMode": {
+            "type": "string",
+            "enum": [
+              "off",
+              "passive",
+              "responseCandidates",
+              "all"
+            ],
+            "default": "off"
+          }
+        }
+      },
+      "mentionDetectionAccount": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "botIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "botUserIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "applicationIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "clientIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "botNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "patterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "mentionPatterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "policy": {
         "type": "object",
         "additionalProperties": false,
@@ -180,6 +347,7 @@
             "type": "string",
             "enum": [
               "none",
+              "passive",
               "all",
               "responseCandidates"
             ],
@@ -203,6 +371,7 @@
             "type": "string",
             "enum": [
               "none",
+              "passive",
               "all",
               "responseCandidates"
             ],
@@ -245,6 +414,9 @@
     }
   },
   "contracts": {
+    "tools": [
+      "search_raw_context"
+    ],
     "agentToolResultMiddleware": [
       "pi",
       "codex"
