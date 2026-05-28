@@ -296,9 +296,9 @@ test("dashboard view exposes button callbacks for runtime and permanent policy",
   });
 
   assert.match(view.text, /Message policy/);
-  assert.match(view.text, /Bot replies: Off/);
-  assert.match(view.text, /Reply override: Off/);
-  assert.match(view.text, /Native mention gate: On/);
+  assert.match(view.text, /Bot replies.*Off/);
+  assert.match(view.text, /Reply override.*Off/);
+  assert.match(view.text, /Native mention gate.*On/);
   assert.match(view.text, /Reply always blocked/);
   assert.match(view.text, /Cause: Native mention gate is enabled/);
   assert.equal(view.componentSpec.blocks.length, 4);
@@ -349,7 +349,7 @@ test("dashboard can switch policy account without manual input", () => {
   const command = parsePolicyDashboardAction(payload);
   const restoredCtx = contextFromPolicyScope(command.scope, ctx);
 
-  assert.match(view.text, /Account: default/);
+  assert.match(view.text, /Account.*default/);
   assert.equal(view.componentSpec.blocks.length, 5);
   assert.equal(command.action, "select-account");
   assert.equal(restoredCtx.accountId, "secondary-bot");
@@ -428,9 +428,9 @@ test("dashboard can render effective config separately from missing runtime over
   });
   const buttons = view.componentSpec.blocks.flatMap((block) => block.buttons);
 
-  assert.match(view.text, /Bot replies: Mention only/);
-  assert.match(view.text, /Bot reads: All messages/);
-  assert.match(view.text, /Reply override: None/);
+  assert.match(view.text, /Bot replies.*Mention only/);
+  assert.match(view.text, /Bot reads.*All messages/);
+  assert.match(view.text, /Reply override.*None/);
   assert.equal(buttons.find((entry) => entry.label === "Mention only").style, "success");
   assert.equal(buttons.find((entry) => entry.label === "All messages").style, "success");
 });

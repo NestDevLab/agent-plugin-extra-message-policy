@@ -900,6 +900,10 @@ function renderConfigLevel(status) {
   return "Config";
 }
 
+function renderPolicyPair(label, value) {
+  return `- ${label}: \`${value}\``;
+}
+
 function normalizeAccountOptions(accounts = []) {
   const seen = new Set();
   return accounts
@@ -1005,45 +1009,49 @@ export function buildPolicyDashboardView({ effectivePolicy, runtimeOverride, sco
     makeButton({ label: details ? "Hide details" : "Details", action: "details", value: details ? "hide" : "show", style: "secondary" }),
     makeButton({ label: "Dismiss", action: "dismiss", style: "secondary" })
   ];
+  const verdict = nativeMode === "on" ? "Reply always blocked" : "Reply always available";
+  const cause = nativeMode === "on"
+    ? "Native mention gate is enabled"
+    : "Native mention gate is not blocking this chat";
   const text = [
-    "Message policy",
-    notice ? `Notice: ${notice}` : "",
+    "**Message policy**",
+    notice ? `**Notice:** ${notice}` : null,
     "",
-    nativeMode === "on" ? "Reply always blocked" : "Reply always available",
-    nativeMode === "on" ? "Cause: Native mention gate is enabled" : "Cause: Native mention gate is not blocking this chat",
-    `Account: ${selectedAccount}`,
+    `**${verdict}**`,
+    `Cause: ${cause}`,
+    `Account: \`${selectedAccount}\``,
     "",
-    "Effective status",
-    `Bot replies: ${renderReplyMode(responseMode)}`,
-    `Bot reads: ${renderReadMode(ingestMode)}`,
-    `Reply always: ${nativeMode === "on" ? "Unavailable" : "Available"}`,
+    "**Effective status**",
+    renderPolicyPair("Bot replies", renderReplyMode(responseMode)),
+    renderPolicyPair("Bot reads", renderReadMode(ingestMode)),
+    renderPolicyPair("Reply always", nativeMode === "on" ? "Unavailable" : "Available"),
     nativeMode === "on"
       ? "Note: the native gate only makes mentioned messages eligible for replies."
       : "Note: the extra policy controls whether messages become reply candidates.",
     "",
-    "Extra policy",
-    `Reply override: ${renderOverrideReply(runtimeOverride)}`,
-    `Read override: ${renderOverrideRead(runtimeOverride)}`,
-    "Saved after restart: Yes",
+    "**Extra policy**",
+    renderPolicyPair("Reply override", renderOverrideReply(runtimeOverride)),
+    renderPolicyPair("Read override", renderOverrideRead(runtimeOverride)),
+    renderPolicyPair("Saved after restart", "Yes"),
     "",
-    "Native OpenClaw gate",
-    `Native mention gate: ${renderMentionRequired(nativeStatus)}`,
-    `Config level: ${renderConfigLevel(nativeStatus)}`,
+    "**Native OpenClaw gate**",
+    renderPolicyPair("Native mention gate", renderMentionRequired(nativeStatus)),
+    renderPolicyPair("Config level", renderConfigLevel(nativeStatus)),
     "",
-    "Controls",
-    accountButtons.length ? "Account: use the first row of buttons." : "Account: only one account is available.",
-    "Reply policy: Replies off / Mention only / Reply always.",
-    "Read policy: Read off / Passive / Candidates / All messages.",
-    "Native gate: turn OpenClaw requireMention on or off.",
-    "Panel: Reset panel / Refresh / Details / Dismiss.",
+    "**Controls**",
+    accountButtons.length ? "- Account: first button row." : "- Account: only one account is available.",
+    "- Reply policy: Replies off / Mention only / Reply always.",
+    "- Read policy: Read off / Passive / Candidates / All messages.",
+    "- Native gate: turn OpenClaw requireMention on or off.",
+    "- Panel: Reset panel / Refresh / Details / Dismiss.",
     details ? renderTechnicalDetails({
       effectivePolicy,
       runtimeOverride,
       nativeStatus,
       scope: effectiveScope,
       panelStatePath
-    }) : ""
-  ].filter((line) => line !== "").join("\n");
+    }) : null
+  ].filter((line) => line != null).join("\n");
   return {
     text,
     componentSpec: {
