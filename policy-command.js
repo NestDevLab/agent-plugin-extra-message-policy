@@ -437,15 +437,17 @@ export function parsePolicyCommand(rawArgs = "") {
 export function parsePolicyDashboardAction(rawPayload = "") {
   const parts = String(rawPayload || "").trim().split(":");
   const section = (parts[0] || "status").toLowerCase();
-  const value = parts[1] === "_" ? "" : (parts[1] || "").toLowerCase();
+  const value = parts[1] === "_" ? "" : (parts[1] || "");
+  const normalizedValue = value.toLowerCase();
   const scope = decodeDashboardScope(parts[2] || "");
   if (["status", "refresh"].includes(section)) return { action: "status", scope };
-  if (section === "details") return { action: "details", value, scope, details: value !== "hide" };
+  if (section === "details") return { action: "details", value: normalizedValue, scope, details: normalizedValue !== "hide" };
   if (section === "dismiss") return { action: "dismiss", scope };
   if (section === "reset") return { action: "reset", scope };
-  if (section === "response") return { action: "set-response", value, scope };
-  if (section === "ingest") return { action: "set-ingest", value, scope };
-  if (section === "native") return { action: "set-native-require", value, scope };
+  if (section === "account") return { action: "select-account", value, scope: { ...(scope || {}), accountId: value } };
+  if (section === "response") return { action: "set-response", value: normalizedValue, scope };
+  if (section === "ingest") return { action: "set-ingest", value: normalizedValue, scope };
+  if (section === "native") return { action: "set-native-require", value: normalizedValue, scope };
   return { action: "status", scope };
 }
 
@@ -558,6 +560,36 @@ function resolveDiscordAccountId(ctx = {}, cfg = {}) {
   const accounts = cfg?.channels?.discord?.accounts;
   const accountIds = accounts && typeof accounts === "object" ? Object.keys(accounts).filter(Boolean) : [];
   return accountIds.length === 1 ? accountIds[0] : "";
+}
+
+export function policyDashboardAccountsFromConfig(cfg = {}) {
+  const accounts = new Map();
+  const addAccount = (id, label = "") => {
+    const normalizedId = textValue(id);
+    if (!normalizedId || accounts.has(normalizedId)) return;
+    accounts.set(normalizedId, {
+      id: normalizedId,
+      label: textValue(label, normalizedId)
+    });
+  };
+  const discordAccounts = cfg?.channels?.discord?.accounts;
+  if (discordAccounts && typeof discordAccounts === "object") {
+    for (const [id, value] of Object.entries(discordAccounts)) {
+      addAccount(id, value && typeof value === "object" ? value.name : "");
+    }
+  }
+  const mentionAccounts = cfg?.plugins?.entries?.["extra-message-policy"]?.config?.mentionDetection?.accounts;
+  if (mentionAccounts && typeof mentionAccounts === "object") {
+    for (const id of Object.keys(mentionAccounts)) {
+      addAccount(id);
+    }
+  }
+  if (!accounts.size) addAccount("default");
+  return [...accounts.values()].sort((a, b) => {
+    if (a.id === "default") return -1;
+    if (b.id === "default") return 1;
+    return a.id.localeCompare(b.id);
+  });
 }
 
 function resolveDiscordConfigScope(cfg = {}, accountId = "") {
@@ -724,6 +756,14 @@ function rowFromButtons(buttons) {
   return { type: "actions", buttons };
 }
 
+function rowsFromButtons(buttons, size = 5) {
+  const rows = [];
+  for (let i = 0; i < buttons.length; i += size) {
+    rows.push(rowFromButtons(buttons.slice(i, i + size)));
+  }
+  return rows;
+}
+
 function selectedStyle(selected) {
   return selected ? "success" : "secondary";
 }
@@ -798,6 +838,48 @@ function renderConfigLevel(status) {
   return "Config";
 }
 
+function normalizeAccountOptions(accounts = []) {
+  const seen = new Set();
+  return accounts
+    .map((account) => {
+      if (typeof account === "string") return { id: account, label: account };
+      if (!account || typeof account !== "object") return null;
+      const id = textValue(account.id, account.accountId, account.value);
+      if (!id) return null;
+      return {
+        id,
+        label: textValue(account.label, account.name, id)
+      };
+    })
+    .filter((account) => {
+      if (!account || seen.has(account.id)) return false;
+      seen.add(account.id);
+      return true;
+    });
+}
+
+function compactLabel(value, maxLength = 32) {
+  const text = textValue(value);
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(1, maxLength - 3))}...`;
+}
+
+function dashboardAccountOptions(accounts, selectedAccount) {
+  if (accounts.length <= 1) return [];
+  const selected = accounts.find((account) => account.id === selectedAccount);
+  const ordered = [];
+  const seen = new Set();
+  const push = (account) => {
+    if (!account || seen.has(account.id) || ordered.length >= 5) return;
+    ordered.push(account);
+    seen.add(account.id);
+  };
+  push(accounts.find((account) => account.id === "default"));
+  push(selected);
+  for (const account of accounts) push(account);
+  return ordered;
+}
+
 function renderTechnicalDetails({ effectivePolicy, runtimeOverride, nativeStatus, scope, panelStatePath }) {
   return [
     "",
@@ -821,15 +903,25 @@ export function validateRuntimeResponseAction(command = {}, nativeStatus = {}) {
   return { ok: true };
 }
 
-export function buildPolicyDashboardView({ effectivePolicy, runtimeOverride, scope, nativeStatus, actorId, details = false, panelStatePath = "", notice = "" } = {}) {
+export function buildPolicyDashboardView({ effectivePolicy, runtimeOverride, scope, nativeStatus, actorId, details = false, panelStatePath = "", notice = "", accountOptions = [] } = {}) {
   const effectiveScope = scope || effectivePolicy?.runtimeScope || runtimeOverride?.runtimeScope || {};
   const allowedUsers = actorId ? [String(actorId)] : undefined;
   const responseMode = responseModeFromEffectivePolicy(effectivePolicy || runtimeOverride);
   const ingestMode = ingestModeFromEffectivePolicy(effectivePolicy || runtimeOverride);
   const nativeMode = nativeStatus?.status || "unavailable";
+  const accounts = normalizeAccountOptions(accountOptions);
+  const selectedAccount = effectiveScope.accountId || "default";
   const makeButton = (params) => {
     return dashboardButton({ ...params, scope: effectiveScope, allowedUsers });
   };
+  const accountButtons = dashboardAccountOptions(accounts, selectedAccount).map((account) => dashboardButton({
+    label: compactLabel(account.label || account.id),
+    action: "account",
+    value: account.id,
+    scope: { ...effectiveScope, accountId: account.id },
+    style: selectedStyle(account.id === selectedAccount),
+    allowedUsers
+  }));
   const responseButtons = [
     makeButton({ label: "Replies off", action: "response", value: "off", style: selectedStyle(responseMode === "off") }),
     makeButton({ label: "Mention only", action: "response", value: "mention", style: selectedStyle(responseMode === "mention") }),
@@ -856,6 +948,7 @@ export function buildPolicyDashboardView({ effectivePolicy, runtimeOverride, sco
     notice ? `Notice: ${notice}` : "",
     "",
     "What happens now",
+    `Account: ${selectedAccount}`,
     `Bot replies: ${renderReplyMode(responseMode)}`,
     `Bot reads: ${renderReadMode(ingestMode)}`,
     `Always reply available: ${nativeMode === "on" ? "No - native gate is on" : "Yes"}`,
@@ -884,6 +977,7 @@ export function buildPolicyDashboardView({ effectivePolicy, runtimeOverride, sco
     componentSpec: {
       reusable: true,
       blocks: [
+        ...rowsFromButtons(accountButtons),
         rowFromButtons(responseButtons),
         rowFromButtons(ingestButtons),
         rowFromButtons(nativeButtons),

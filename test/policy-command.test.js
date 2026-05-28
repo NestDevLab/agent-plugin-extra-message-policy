@@ -7,6 +7,7 @@ import {
   buildPolicyDashboardView,
   contextFromPolicyScope,
   normalizePolicyCommandConfig,
+  policyDashboardAccountsFromConfig,
   parsePolicyDashboardAction,
   parsePolicyCommand,
   renderPolicyStatus,
@@ -295,6 +296,85 @@ test("dashboard callback payload keeps channel scope for interaction handlers", 
   assert.equal(restoredCtx.guildId, "guild-1");
   assert.equal(restoredCtx.channelId, "channel-1");
   assert.equal(restoredCtx.conversationId, "thread-1");
+});
+
+test("dashboard can switch policy account without manual input", () => {
+  const commandConfig = normalizePolicyCommandConfig({ policyCommand: { applyDefault: true } });
+  const runtimePolicy = resolveRuntimePolicyOverride(commandConfig, {}, {}, ctx);
+  const view = buildPolicyDashboardView({
+    effectivePolicy: runtimePolicy,
+    runtimeOverride: runtimePolicy,
+    scope: runtimePolicy.runtimeScope,
+    nativeStatus: { status: "unset" },
+    accountOptions: ["default", "secondary-bot"]
+  });
+  const buttons = view.componentSpec.blocks.flatMap((block) => block.buttons);
+  const accountEntry = buttons.find((entry) => entry.callbackData.startsWith("policy:account:secondary-bot:"));
+  const payload = accountEntry.callbackData.replace(/^policy:/, "");
+  const command = parsePolicyDashboardAction(payload);
+  const restoredCtx = contextFromPolicyScope(command.scope, ctx);
+
+  assert.match(view.text, /Account: default/);
+  assert.equal(view.componentSpec.blocks.length, 5);
+  assert.equal(command.action, "select-account");
+  assert.equal(restoredCtx.accountId, "secondary-bot");
+  assert.equal(restoredCtx.guildId, "guild-1");
+  assert.equal(restoredCtx.channelId, "channel-1");
+});
+
+test("dashboard account selector keeps selected account visible when there are many accounts", () => {
+  const commandConfig = normalizePolicyCommandConfig({ policyCommand: { applyDefault: true } });
+  const runtimePolicy = resolveRuntimePolicyOverride(
+    commandConfig,
+    {},
+    {},
+    { ...ctx, accountId: "zeta" }
+  );
+  const view = buildPolicyDashboardView({
+    effectivePolicy: runtimePolicy,
+    runtimeOverride: runtimePolicy,
+    scope: runtimePolicy.runtimeScope,
+    nativeStatus: { status: "unset" },
+    accountOptions: ["default", "alpha", "bravo", "charlie", "delta", "zeta"]
+  });
+  const buttons = view.componentSpec.blocks.flatMap((block) => block.buttons);
+  const accountButtons = buttons.filter((entry) => entry.callbackData.startsWith("policy:account:"));
+
+  assert.equal(view.componentSpec.blocks.length, 5);
+  assert.ok(accountButtons.some((entry) => entry.callbackData.startsWith("policy:account:zeta:")));
+  assert.equal(accountButtons.find((entry) => entry.callbackData.startsWith("policy:account:zeta:")).style, "success");
+});
+
+test("dashboard accounts include configured discord and mention-detection accounts", () => {
+  const accounts = policyDashboardAccountsFromConfig({
+    channels: {
+      discord: {
+        accounts: {
+          "project-bot": { name: "Project Bot" },
+          default: {}
+        }
+      }
+    },
+    plugins: {
+      entries: {
+        "extra-message-policy": {
+          config: {
+            mentionDetection: {
+              accounts: {
+                secondary: {}
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  assert.deepEqual(accounts, [
+    { id: "default", label: "default" },
+    { id: "project-bot", label: "Project Bot" },
+    { id: "secondary", label: "secondary" }
+  ]);
 });
 
 test("dashboard can render effective config separately from missing runtime override", () => {

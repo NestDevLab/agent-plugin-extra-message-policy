@@ -12,6 +12,7 @@ import {
   defaultPolicyStatePath,
   loadPolicyState,
   normalizePolicyCommandConfig,
+  policyDashboardAccountsFromConfig,
   parsePolicyDashboardAction,
   parsePolicyCommand,
   renderPolicyHelp,
@@ -330,6 +331,7 @@ export default definePluginEntry({
 
     if (commandConfig.enabled) {
       const buildDashboard = async (ctx = {}, currentState = null, nativeConfig = null, options = {}) => {
+        const currentConfig = nativeConfig || api.runtime?.config?.current?.() || api.config || {};
         const event = commandEventFromContext(ctx);
         const loadedState = currentState || await loadPolicyState(policyStatePath);
         const basePolicy = resolvePolicy(cfg, event, ctx);
@@ -343,7 +345,7 @@ export default definePluginEntry({
         )?.runtimeScope;
         let nativeStatus = null;
         try {
-          nativeStatus = resolveNativeRequireMentionStatus(ctx || {}, nativeConfig || api.runtime?.config?.current?.() || api.config || {});
+          nativeStatus = resolveNativeRequireMentionStatus(ctx || {}, currentConfig);
         } catch {
           nativeStatus = null;
         }
@@ -355,7 +357,8 @@ export default definePluginEntry({
           actorId: ctx?.senderId,
           details: options.details === true,
           panelStatePath: policyStatePath,
-          notice: options.notice || ""
+          notice: options.notice || "",
+          accountOptions: policyDashboardAccountsFromConfig(currentConfig)
         });
       };
 
@@ -371,7 +374,7 @@ export default definePluginEntry({
           return { text: nativeResult?.text || renderPolicyHelp(commandConfig.commandName) };
         }
 
-        if (command.action === "status" || command.action === "details") {
+        if (command.action === "status" || command.action === "details" || command.action === "select-account") {
           return dashboardReply(await buildDashboard(effectiveCtx, currentState, null, { details: command.details === true }), effectiveCtx);
         }
 
