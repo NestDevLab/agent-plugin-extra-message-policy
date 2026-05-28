@@ -221,6 +221,7 @@ function commandEventFromContext(ctx = {}) {
     accountId: ctx?.accountId,
     guildId: ctx?.guildId || ctx?.rawGuildId,
     channelId: ctx?.channelId,
+    parentChannelId: ctx?.parentChannelId || ctx?.parentId || ctx?.metadata?.parentChannelId || ctx?.metadata?.parent_channel_id,
     conversationId: ctx?.conversationId || ctx?.to || ctx?.target,
     metadata: ctx?.metadata || {}
   };
@@ -251,11 +252,13 @@ function dashboardReply(view, ctx = {}) {
 }
 
 function dispatchPolicyContext(ctx = {}) {
+  const parentChannelId = ctx.NativeParentChannelId || ctx.ParentChannelId || ctx.parentChannelId || ctx.ParentId || ctx.parentId;
   return {
     accountId: ctx.AccountId || ctx.accountId,
     guildId: ctx.GroupSpace || ctx.guildId || ctx.rawGuildId,
     rawGuildId: ctx.GroupSpace || ctx.rawGuildId || ctx.guildId,
     channelId: ctx.NativeChannelId || ctx.ChannelId || ctx.channelId,
+    parentChannelId,
     conversationId: ctx.OriginatingTo || ctx.To || ctx.conversationId,
     sessionKey: ctx.SessionKey || ctx.sessionKey,
     senderId: ctx.SenderId || ctx.senderId,
@@ -264,18 +267,21 @@ function dispatchPolicyContext(ctx = {}) {
       accountId: ctx.AccountId || ctx.accountId,
       guildId: ctx.GroupSpace || ctx.guildId,
       channelId: ctx.NativeChannelId || ctx.ChannelId || ctx.channelId,
+      parentChannelId,
       to: ctx.OriginatingTo || ctx.To
     }
   };
 }
 
 function dispatchPolicyEvent(ctx = {}) {
+  const parentChannelId = ctx.NativeParentChannelId || ctx.ParentChannelId || ctx.parentChannelId || ctx.ParentId || ctx.parentId;
   return {
     content: ctx.BodyForAgent || ctx.Body || ctx.content,
     body: ctx.BodyForAgent || ctx.Body || ctx.body,
     accountId: ctx.AccountId,
     guildId: ctx.GroupSpace,
     channelId: ctx.NativeChannelId || ctx.ChannelId,
+    parentChannelId,
     conversationId: ctx.OriginatingTo || ctx.To,
     sessionKey: ctx.SessionKey,
     senderId: ctx.SenderId,
@@ -284,6 +290,7 @@ function dispatchPolicyEvent(ctx = {}) {
       accountId: ctx.AccountId,
       guildId: ctx.GroupSpace,
       channelId: ctx.NativeChannelId || ctx.ChannelId,
+      parentChannelId,
       to: ctx.OriginatingTo || ctx.To
     }
   };

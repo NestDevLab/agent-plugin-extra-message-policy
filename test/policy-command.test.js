@@ -241,6 +241,39 @@ test("native requireMention status reports exact channel config source", () => {
   assert.match(status.source, /channels\.channel-1\.requireMention$/);
 });
 
+test("native requireMention status inherits parent channel config for new subthreads", () => {
+  const cfg = {
+    channels: {
+      discord: {
+        accounts: {
+          default: {
+            guilds: {
+              "guild-1": {
+                requireMention: true,
+                channels: {
+                  "*": { enabled: false, requireMention: true },
+                  "parent-1": { enabled: true, requireMention: false }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+  const status = resolveNativeRequireMentionStatus({
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "thread-1",
+    parentId: "parent-1",
+    provider: "discord"
+  }, cfg);
+
+  assert.equal(status.status, "off");
+  assert.equal(status.target.parentChannelId, "parent-1");
+  assert.match(status.source, /channels\.parent-1\.requireMention$/);
+});
+
 test("dashboard view exposes button callbacks for runtime and permanent policy", () => {
   const commandConfig = normalizePolicyCommandConfig({ policyCommand: { applyDefault: true } });
   const runtimePolicy = resolveRuntimePolicyOverride(commandConfig, {}, {}, ctx);
@@ -266,13 +299,15 @@ test("dashboard view exposes button callbacks for runtime and permanent policy",
   assert.match(view.text, /Bot replies: Off/);
   assert.match(view.text, /Reply override: Off/);
   assert.match(view.text, /Native mention gate: On/);
-  assert.match(view.text, /Always reply available: No - native gate is on/);
+  assert.match(view.text, /Reply always blocked/);
+  assert.match(view.text, /Cause: Native mention gate is enabled/);
   assert.equal(view.componentSpec.blocks.length, 4);
   const buttons = view.componentSpec.blocks.flatMap((block) => block.buttons);
   assert.ok(buttons.some((entry) => entry.callbackData.startsWith("policy:response:off:")));
   assert.ok(buttons.some((entry) => entry.callbackData.startsWith("policy:ingest:passive:")));
   assert.ok(buttons.some((entry) => entry.callbackData.startsWith("policy:native:on:")));
-  assert.ok(buttons.some((entry) => entry.label === "Always blocked"));
+  assert.ok(buttons.some((entry) => entry.label === "Reply always blocked"));
+  assert.ok(buttons.some((entry) => entry.label === "Disable native gate"));
   assert.ok(buttons.every((entry) => entry.allowedUsers[0] === "operator"));
 });
 
@@ -437,6 +472,30 @@ test("subthreads inherit parent panel override until overwritten", () => {
   assert.equal(childOverride.runtimeResponseMode, "always");
   assert.equal(childOverride.runtimeInherited, false);
   assert.equal(childOverride.runtimeMatched, "discord:default:guild-1:thread-1");
+});
+
+test("new Discord subthreads inherit parent panel override from parent id aliases", () => {
+  const commandConfig = normalizePolicyCommandConfig({});
+  const parent = applyRuntimeCommand(
+    commandConfig,
+    {},
+    {},
+    { ...ctx, channelId: "parent-1", conversationId: "channel:parent-1" },
+    parsePolicyCommand("ingest all"),
+    "operator"
+  );
+  const inherited = resolveRuntimePolicyOverride(commandConfig, parent.state, {}, {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "thread-2",
+    conversationId: "channel:thread-2",
+    parentId: "parent-1",
+    senderId: "operator"
+  });
+
+  assert.equal(inherited.runtimeIngestMode, "all");
+  assert.equal(inherited.runtimeInherited, true);
+  assert.equal(inherited.runtimeMatched, "discord:default:guild-1:parent-1");
 });
 
 test("details button toggles technical details", () => {

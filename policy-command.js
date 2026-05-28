@@ -38,6 +38,10 @@ function stripConversationPrefix(value) {
   return text;
 }
 
+function parentChannelValue(...values) {
+  return stripConversationPrefix(textValue(...values));
+}
+
 function encodeDashboardScope(scope = {}) {
   const compact = {
     a: scope.accountId || "",
@@ -235,14 +239,39 @@ export function scopeFromContext(event = {}, ctx = {}) {
   const parentChannelId = stripConversationPrefix(textValue(
     ctx.parentChannelId,
     ctx.parentConversationId,
+    ctx.parentId,
+    ctx.ParentId,
+    ctx.threadParentId,
+    ctx.ThreadParentId,
+    ctx.NativeParentChannelId,
+    ctx.ParentChannelId,
     ctx.messageParentChannelId,
     ctx.message?.parentChannelId,
+    ctx.message?.parent_channel_id,
+    ctx.message?.parentId,
+    ctx.message?.parent_id,
     ctx.metadata?.parentChannelId,
     ctx.metadata?.parent_channel_id,
+    ctx.metadata?.parentId,
+    ctx.metadata?.parent_id,
+    ctx.metadata?.threadParentId,
+    ctx.metadata?.thread_parent_id,
+    ctx.raw?.parentId,
+    ctx.raw?.parent_id,
     event.parentChannelId,
     event.parentConversationId,
+    event.parentId,
+    event.parent_id,
+    event.threadParentId,
+    event.thread_parent_id,
     event.metadata?.parentChannelId,
-    event.metadata?.parent_channel_id
+    event.metadata?.parent_channel_id,
+    event.metadata?.parentId,
+    event.metadata?.parent_id,
+    event.metadata?.threadParentId,
+    event.metadata?.thread_parent_id,
+    event.raw?.parentId,
+    event.raw?.parent_id
   ));
   const directParentAwareChannelId = textValue(
     parentChannelId,
@@ -656,6 +685,29 @@ export function resolveNativeRequireMentionTarget(ctx = {}, cfg = {}) {
     ctx.metadata?.channelId,
     ctx.metadata?.channel_id
   );
+  const parentChannelId = parentChannelValue(
+    ctx.parentChannelId,
+    ctx.parentConversationId,
+    ctx.parentId,
+    ctx.ParentId,
+    ctx.threadParentId,
+    ctx.ThreadParentId,
+    ctx.NativeParentChannelId,
+    ctx.ParentChannelId,
+    ctx.messageParentChannelId,
+    ctx.message?.parentChannelId,
+    ctx.message?.parent_channel_id,
+    ctx.message?.parentId,
+    ctx.message?.parent_id,
+    ctx.metadata?.parentChannelId,
+    ctx.metadata?.parent_channel_id,
+    ctx.metadata?.parentId,
+    ctx.metadata?.parent_id,
+    ctx.metadata?.threadParentId,
+    ctx.metadata?.thread_parent_id,
+    ctx.raw?.parentId,
+    ctx.raw?.parent_id
+  );
   const targetValue = textValue(ctx.To, ctx.to, ctx.target, ctx.conversationId, ctx.chatId);
   const zoneId = directChannelId || stripConversationPrefix(targetValue);
   if (!zoneId) return { error: "Unable to resolve the current Discord channel or thread." };
@@ -679,7 +731,8 @@ export function resolveNativeRequireMentionTarget(ctx = {}, cfg = {}) {
     scopePath: scopeInfo.path,
     scopeLabel: scopeInfo.label,
     guildId,
-    zoneId
+    zoneId,
+    parentChannelId
   };
 }
 
@@ -692,12 +745,20 @@ export function resolveNativeRequireMentionStatus(ctx = {}, cfg = {}) {
     : discord;
   const guildEntry = targetScope?.guilds?.[target.guildId];
   const channelEntry = guildEntry?.channels?.[target.zoneId];
+  const parentChannelEntry = target.parentChannelId ? guildEntry?.channels?.[target.parentChannelId] : null;
   const wildcardEntry = guildEntry?.channels?.["*"];
   if (channelEntry && Object.prototype.hasOwnProperty.call(channelEntry, "requireMention")) {
     return {
       target,
       status: channelEntry.requireMention ? "on" : "off",
       source: `${target.scopePath}.guilds.${target.guildId}.channels.${target.zoneId}.requireMention`
+    };
+  }
+  if (parentChannelEntry && Object.prototype.hasOwnProperty.call(parentChannelEntry, "requireMention")) {
+    return {
+      target,
+      status: parentChannelEntry.requireMention ? "on" : "off",
+      source: `${target.scopePath}.guilds.${target.guildId}.channels.${target.parentChannelId}.requireMention`
     };
   }
   if (guildEntry && Object.prototype.hasOwnProperty.call(guildEntry, "requireMention")) {
@@ -833,6 +894,7 @@ function renderConfigLevel(status) {
   const zone = status.target?.zoneId ? String(status.target.zoneId) : "";
   if (zone && source.includes(`.channels.${zone}.requireMention`)) return "This channel";
   if (source.includes(".channels.*.requireMention")) return "Channel default";
+  if (source.includes(".channels.") && source.endsWith(".requireMention")) return "Parent channel";
   if (/\.guilds\.[^.]+\.requireMention$/.test(source)) return "Server default";
   if (status.status === "unset") return "Not set";
   return "Config";
@@ -925,7 +987,7 @@ export function buildPolicyDashboardView({ effectivePolicy, runtimeOverride, sco
   const responseButtons = [
     makeButton({ label: "Replies off", action: "response", value: "off", style: selectedStyle(responseMode === "off") }),
     makeButton({ label: "Mention only", action: "response", value: "mention", style: selectedStyle(responseMode === "mention") }),
-    makeButton({ label: nativeMode === "on" ? "Always blocked" : "Always reply", action: "response", value: "always", style: selectedStyle(responseMode === "always") })
+    makeButton({ label: nativeMode === "on" ? "Reply always blocked" : "Reply always", action: "response", value: "always", style: selectedStyle(responseMode === "always") })
   ];
   const ingestButtons = [
     makeButton({ label: "Read off", action: "ingest", value: "off", style: selectedStyle(ingestMode === "off") }),
@@ -935,7 +997,7 @@ export function buildPolicyDashboardView({ effectivePolicy, runtimeOverride, sco
   ];
   const nativeButtons = [
     makeButton({ label: "Native gate on", action: "native", value: "on", style: selectedStyle(nativeMode === "on") }),
-    makeButton({ label: "Native gate off", action: "native", value: "off", style: selectedStyle(nativeMode === "off") })
+    makeButton({ label: nativeMode === "on" ? "Disable native gate" : "Native gate off", action: "native", value: "off", style: nativeMode === "on" ? "primary" : selectedStyle(nativeMode === "off") })
   ];
   const utilityButtons = [
     makeButton({ label: "Reset panel", action: "reset", style: "danger" }),
@@ -947,23 +1009,33 @@ export function buildPolicyDashboardView({ effectivePolicy, runtimeOverride, sco
     "Message policy",
     notice ? `Notice: ${notice}` : "",
     "",
-    "What happens now",
+    nativeMode === "on" ? "Reply always blocked" : "Reply always available",
+    nativeMode === "on" ? "Cause: Native mention gate is enabled" : "Cause: Native mention gate is not blocking this chat",
     `Account: ${selectedAccount}`,
+    "",
+    "Effective status",
     `Bot replies: ${renderReplyMode(responseMode)}`,
     `Bot reads: ${renderReadMode(ingestMode)}`,
-    `Always reply available: ${nativeMode === "on" ? "No - native gate is on" : "Yes"}`,
+    `Reply always: ${nativeMode === "on" ? "Unavailable" : "Available"}`,
+    nativeMode === "on"
+      ? "Note: the native gate only makes mentioned messages eligible for replies."
+      : "Note: the extra policy controls whether messages become reply candidates.",
     "",
-    "Panel runtime controls",
+    "Extra policy",
     `Reply override: ${renderOverrideReply(runtimeOverride)}`,
     `Read override: ${renderOverrideRead(runtimeOverride)}`,
     "Saved after restart: Yes",
     "",
-    "Permanent OpenClaw gate",
+    "Native OpenClaw gate",
     `Native mention gate: ${renderMentionRequired(nativeStatus)}`,
     `Config level: ${renderConfigLevel(nativeStatus)}`,
-    nativeMode === "on"
-      ? "Native gate On means only mentioned messages become reply candidates. It blocks Reply always."
-      : "Native gate Off lets this panel decide whether replies are Off, Mention only, or Always.",
+    "",
+    "Controls",
+    accountButtons.length ? "Account: use the first row of buttons." : "Account: only one account is available.",
+    "Reply policy: Replies off / Mention only / Reply always.",
+    "Read policy: Read off / Passive / Candidates / All messages.",
+    "Native gate: turn OpenClaw requireMention on or off.",
+    "Panel: Reset panel / Refresh / Details / Dismiss.",
     details ? renderTechnicalDetails({
       effectivePolicy,
       runtimeOverride,
