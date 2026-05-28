@@ -451,6 +451,24 @@ export function applyRuntimePolicy(basePolicy, runtimeOverride, event = {}, ctx 
   };
 }
 
+export function applyNativeMentionGatePolicy(policy = {}, nativeStatus = {}, event = {}, ctx = {}) {
+  if (nativeStatus?.status !== "on" || policy.requireMention === true) return policy;
+  const merged = {
+    ...policy,
+    requireMention: true,
+    nativeMentionGate: true,
+    nativeMentionGateSource: nativeStatus.source || "",
+    matched: `${policy.matched || "base"}+native-requireMention`
+  };
+  const mentioned = wasMentioned(event, ctx, merged) === true;
+  return {
+    ...merged,
+    mentionRequired: true,
+    mentionSatisfied: mentioned,
+    respond: merged.respond && mentioned
+  };
+}
+
 export function parsePolicyCommand(rawArgs = "") {
   const parts = String(rawArgs || "").trim().split(/\s+/).filter(Boolean);
   const section = (parts[0] || "status").toLowerCase();

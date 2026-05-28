@@ -5,6 +5,7 @@ import { buildDiscordComponentMessage, registerBuiltDiscordComponentMessage } fr
 import { normalizeConfig, resolvePolicy, shouldIngest, shouldSuppressResponse } from "./policy.js";
 import {
   applyNativeRequireMentionCommand,
+  applyNativeMentionGatePolicy,
   applyRuntimeCommand,
   applyRuntimePolicy,
   buildPolicyDashboardView,
@@ -330,10 +331,18 @@ export default definePluginEntry({
         api.runtime?.config?.current?.() || api.config || {},
         api.pluginConfig || {}
       );
+      const currentConfig = api.runtime?.config?.current?.() || api.config || {};
       const basePolicy = resolvePolicy(cfg, enriched.event, enriched.ctx);
       const runtimeState = await loadPolicyState(policyStatePath);
       const runtimeOverride = resolveRuntimePolicyOverride(commandConfig, runtimeState, enriched.event, enriched.ctx);
-      return runtimeOverride ? applyRuntimePolicy(basePolicy, runtimeOverride, enriched.event, enriched.ctx) : basePolicy;
+      const effectivePolicy = runtimeOverride ? applyRuntimePolicy(basePolicy, runtimeOverride, enriched.event, enriched.ctx) : basePolicy;
+      let nativeStatus = null;
+      try {
+        nativeStatus = resolveNativeRequireMentionStatus(enriched.ctx, currentConfig);
+      } catch {
+        nativeStatus = null;
+      }
+      return applyNativeMentionGatePolicy(effectivePolicy, nativeStatus, enriched.event, enriched.ctx);
     };
 
     if (commandConfig.enabled) {

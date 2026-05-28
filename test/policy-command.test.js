@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   applyNativeRequireMentionOverride,
+  applyNativeMentionGatePolicy,
   applyRuntimeCommand,
   applyRuntimePolicy,
   buildPolicyDashboardView,
@@ -16,6 +17,7 @@ import {
   resolveRuntimePolicyOverride,
   validateRuntimeResponseAction
 } from "../policy-command.js";
+import { normalizeConfig, resolvePolicy } from "../policy.js";
 
 const ctx = {
   accountId: "default",
@@ -65,6 +67,88 @@ test("runtime mention override suppresses unmentioned dispatches", () => {
   assert.equal(unmentioned.mentionSatisfied, false);
   assert.equal(mentioned.respond, true);
   assert.equal(mentioned.mentionSatisfied, true);
+});
+
+test("fixed native mention gate applies when no dynamic policy exists", () => {
+  const base = resolvePolicy(
+    normalizeConfig({ defaultPolicy: { respond: true, ingestMode: "responseCandidates" } }),
+    { wasMentioned: false },
+    ctx
+  );
+  const effective = applyNativeMentionGatePolicy(base, {
+    status: "on",
+    source: "channels.discord.accounts.default.guilds.guild-1.channels.channel-1.requireMention"
+  }, { wasMentioned: false }, ctx);
+
+  assert.equal(base.respond, true);
+  assert.equal(base.requireMention, undefined);
+  assert.equal(effective.respond, false);
+  assert.equal(effective.requireMention, true);
+  assert.equal(effective.mentionSatisfied, false);
+  assert.equal(effective.nativeMentionGate, true);
+});
+
+test("effective response policy matrix respects config, runtime, native gate, and mention state", async (t) => {
+  const runtimeModes = [null, "off", "mention", "always"];
+  const nativeModes = ["unset", "off", "on"];
+  const baseRequireModes = [false, true];
+  const mentionModes = [false, true];
+
+  for (const runtimeMode of runtimeModes) {
+    for (const nativeMode of nativeModes) {
+      for (const baseRequireMention of baseRequireModes) {
+        for (const mentioned of mentionModes) {
+          await t.test([
+            `runtime=${runtimeMode || "none"}`,
+            `native=${nativeMode}`,
+            `baseRequire=${baseRequireMention}`,
+            `mentioned=${mentioned}`
+          ].join(" "), () => {
+            const base = resolvePolicy(
+              normalizeConfig({
+                defaultPolicy: {
+                  respond: true,
+                  ingestMode: "all",
+                  requireMention: baseRequireMention
+                }
+              }),
+              { wasMentioned: mentioned },
+              ctx
+            );
+            const runtimeOverride = runtimeMode
+              ? {
+                  respond: runtimeMode !== "off",
+                  requireMention: runtimeMode === "mention",
+                  ingestMode: "all",
+                  runtimeResponseMode: runtimeMode,
+                  runtimeIngestMode: "all",
+                  runtimeMatched: "runtime-test",
+                  runtimeScope: ctx
+                }
+              : null;
+            const runtimePolicy = runtimeOverride
+              ? applyRuntimePolicy(base, runtimeOverride, { wasMentioned: mentioned }, ctx)
+              : base;
+            const effective = applyNativeMentionGatePolicy(runtimePolicy, {
+              status: nativeMode,
+              source: "native-test"
+            }, { wasMentioned: mentioned }, ctx);
+            const responseOff = runtimeMode === "off";
+            const mentionRequired = !responseOff && (
+              runtimeMode === "mention"
+              || (runtimeMode !== "always" && baseRequireMention)
+              || nativeMode === "on"
+            );
+            const expectedRespond = responseOff ? false : mentionRequired ? mentioned : true;
+
+            assert.equal(effective.respond, expectedRespond);
+            assert.equal(Boolean(effective.requireMention), mentionRequired || (responseOff && nativeMode === "on"));
+            assert.equal(effective.ingestMode, "all");
+          });
+        }
+      }
+    }
+  }
 });
 
 test("runtime always override does not require a mention", () => {
@@ -272,6 +356,45 @@ test("native requireMention status inherits parent channel config for new subthr
   assert.equal(status.status, "off");
   assert.equal(status.target.parentChannelId, "parent-1");
   assert.match(status.source, /channels\.parent-1\.requireMention$/);
+});
+
+test("native requireMention status prefers account-scoped config over top-level Discord config", () => {
+  const cfg = {
+    channels: {
+      discord: {
+        guilds: {
+          "guild-1": {
+            channels: {
+              "*": { enabled: true, requireMention: false },
+              "parent-1": { enabled: true, requireMention: false }
+            }
+          }
+        },
+        accounts: {
+          "project-bot": {
+            guilds: {
+              "guild-1": {
+                requireMention: true,
+                channels: {
+                  "*": { enabled: true, requireMention: true }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+  const status = resolveNativeRequireMentionStatus({
+    accountId: "project-bot",
+    guildId: "guild-1",
+    channelId: "thread-1",
+    parentId: "parent-1",
+    provider: "discord"
+  }, cfg);
+
+  assert.equal(status.status, "on");
+  assert.match(status.source, /^channels\.discord\.accounts\.project-bot\./);
 });
 
 test("dashboard view exposes button callbacks for runtime and permanent policy", () => {
