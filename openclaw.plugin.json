@@ -212,6 +212,29 @@
           }
         }
       },
+      "nativeReplyHandling": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Automatically attach native reply metadata to outbound messages when the runtime exposes the inbound source message id.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "platforms": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "discord"
+              ]
+            },
+            "default": [
+              "discord"
+            ]
+          }
+        }
+      },
       "directFollowupHandling": {
         "type": "object",
         "additionalProperties": false,

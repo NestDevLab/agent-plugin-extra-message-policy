@@ -65,6 +65,10 @@
           }
         }
       },
+      "nativeReplyHandling": {
+        "enabled": true,
+        "platforms": ["discord"]
+      },
       "rawRecall": {
         "enabled": true,
         "appendGuidance": true,

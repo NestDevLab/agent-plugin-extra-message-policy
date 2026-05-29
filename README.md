@@ -33,6 +33,7 @@ Important points:
 - `ingestMode` controls whether the plugin captures all readable messages or only messages that reached the response pipeline.
 - `respond: false` suppresses replies even when normal routing, mentions, or allow-list rules would otherwise allow a response.
 - On platforms with granular send permissions, e.g. Discord, the platform may block sending before this policy visibly “fires”. The plugin policy is still the same everywhere.
+- On platforms with native reply metadata, the plugin can attach replies to the inbound source message so agent answers stay threaded and readable.
 
 ## Use cases
 
@@ -138,11 +139,36 @@ This command shape follows the preferred custom-plugin convention: one top-level
             "names": ["Your Bot Name"]
           }
         }
+      },
+      "nativeReplyHandling": {
+        "enabled": true,
+        "platforms": ["discord"]
       }
     }
   }
 }
 ```
+
+## Native reply handling
+
+`nativeReplyHandling` makes outbound responses use platform-native reply
+metadata when the runtime exposes the inbound source message id.
+
+Default:
+
+```jsonc
+{
+  "nativeReplyHandling": {
+    "enabled": true,
+    "platforms": ["discord"]
+  }
+}
+```
+
+The plugin does not replace routing or mentions. For Discord mesh traffic, agents
+should still send hydrated `cc-mesh:` mentions; native replies only attach the
+message to the specific source turn for readability. Existing explicit
+`replyTo` values are preserved.
 
 ## Raw recall
 
@@ -221,4 +247,4 @@ The plugin posts the normalized ingest record as JSON.
 
 - `message_received` handles `ingestMode: "all"`.
 - `before_dispatch` handles `ingestMode: "responseCandidates"` and suppresses replies when `respond: false`.
-- `message_sending` is a defensive outbound guard for any reply associated with a suppressed dispatch.
+- `message_sending` is a defensive outbound guard for any reply associated with a suppressed dispatch, and applies native reply metadata when enabled.

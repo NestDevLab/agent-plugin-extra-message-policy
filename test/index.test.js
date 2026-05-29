@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { applyNativeReplyHandling, normalizeNativeReplyHandling } from "../native-reply.js";
 import {
   deriveMentionFact,
   forceMentionedDispatchContext,
@@ -25,6 +26,33 @@ test("recalled mention facts enrich reduced before_dispatch events", () => {
 
   assert.equal(enriched.event.wasMentioned, true);
   assert.equal(enriched.ctx.wasMentioned, true);
+});
+
+test("native reply handling adds Discord replyTo from dispatch context", () => {
+  const result = applyNativeReplyHandling({}, {
+    sessionKey: "agent:main:discord:channel:room-1",
+    messageId: "source-message-1"
+  }, normalizeNativeReplyHandling());
+
+  assert.deepEqual(result, { replyTo: "source-message-1" });
+});
+
+test("native reply handling preserves explicit outbound reply target", () => {
+  const result = applyNativeReplyHandling({ replyTo: "explicit-message" }, {
+    sessionKey: "agent:main:discord:channel:room-1",
+    messageId: "source-message-1"
+  }, normalizeNativeReplyHandling());
+
+  assert.equal(result, null);
+});
+
+test("native reply handling ignores non-Discord contexts", () => {
+  const result = applyNativeReplyHandling({}, {
+    sessionKey: "agent:main:telegram:group:room-1",
+    messageId: "source-message-1"
+  }, normalizeNativeReplyHandling());
+
+  assert.equal(result, null);
 });
 
 test("always reply dispatch context marks the turn as addressed", () => {

@@ -30,6 +30,7 @@ import {
   rememberMentionFact,
   withDerivedMentionFact
 } from "./runtime-context.js";
+import { applyNativeReplyHandling, normalizeNativeReplyHandling } from "./native-reply.js";
 
 function eventMessageId(event = {}, ctx = {}) {
   return String(event.messageId ?? ctx.messageId ?? "");
@@ -312,6 +313,7 @@ export default definePluginEntry({
     const commandConfig = normalizePolicyCommandConfig(api.pluginConfig || {});
     const policyStatePath = defaultPolicyStatePath(api, commandConfig);
     const approvalPromptHandling = normalizeApprovalPromptHandling(api.pluginConfig?.approvalPromptHandling || {});
+    const nativeReplyHandling = normalizeNativeReplyHandling(api.pluginConfig?.nativeReplyHandling || {});
     if (!cfg.enabled) {
       api.logger.info("extra-message-policy: disabled");
       return;
@@ -507,13 +509,15 @@ export default definePluginEntry({
     });
 
     api.on("message_sending", async (_event, ctx) => {
+      const nativeReplyPatch = applyNativeReplyHandling(_event, ctx, nativeReplyHandling);
       if (approvalPromptHandling.mode !== "off" && looksLikeApprovalPrompt(_event?.content ?? _event?.text ?? _event?.message)) {
         api.logger.info(`extra-message-policy: canceled outbound approval prompt for ${ctx.sessionKey || ctx.conversationId || ctx.channelId || "unknown"}`);
         return approvalPromptHandling.mode === "replace"
-          ? { content: approvalPromptHandling.replacementText }
+          ? { ...(nativeReplyPatch || {}), content: approvalPromptHandling.replacementText }
           : { cancel: true };
       }
       if (lookupResponseAllowed(state, ctx) === false) return { cancel: true };
+      if (nativeReplyPatch) return nativeReplyPatch;
     });
   }
 });
