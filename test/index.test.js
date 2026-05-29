@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { applyNativeReplyHandling, normalizeNativeReplyHandling } from "../native-reply.js";
 import {
+  deriveNativeReplyMentionFact,
   deriveMentionFact,
   forceMentionedDispatchContext,
   rememberMentionFact,
@@ -106,4 +107,53 @@ test("derived mention facts detect configured account names", () => {
 
   assert.equal(enriched.event.wasMentioned, true);
   assert.equal(enriched.ctx.wasMentioned, true);
+});
+
+test("native Discord replies to the configured bot satisfy mention policy", () => {
+  const botId = "111111111111111111";
+  const cfg = {
+    channels: {
+      discord: {
+        accounts: {
+          default: {
+            botUserId: botId
+          }
+        }
+      }
+    }
+  };
+  const event = {
+    accountId: "default",
+    sessionKey: "agent:main:discord:channel:room-1",
+    referenced_message: {
+      author: { id: botId }
+    }
+  };
+
+  assert.equal(deriveNativeReplyMentionFact(event, {}, cfg), true);
+  assert.equal(deriveMentionFact(event, {}, cfg), true);
+});
+
+test("native Discord replies without target author do not satisfy mention policy", () => {
+  const cfg = {
+    channels: {
+      discord: {
+        accounts: {
+          default: {
+            botUserId: "111111111111111111"
+          }
+        }
+      }
+    }
+  };
+  const event = {
+    accountId: "default",
+    sessionKey: "agent:main:discord:channel:room-1",
+    message_reference: {
+      message_id: "source-message-1"
+    }
+  };
+
+  assert.equal(deriveNativeReplyMentionFact(event, {}, cfg), undefined);
+  assert.equal(deriveMentionFact(event, {}, cfg), undefined);
 });

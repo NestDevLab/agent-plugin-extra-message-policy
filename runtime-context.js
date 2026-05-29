@@ -63,6 +63,13 @@ function textValue(...values) {
   return "";
 }
 
+function firstObject(...values) {
+  for (const value of values) {
+    if (value && typeof value === "object" && !Array.isArray(value)) return value;
+  }
+  return null;
+}
+
 function normalizeMentionText(text) {
   return String(text || "").replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u206f]/g, "").toLowerCase();
 }
@@ -233,7 +240,63 @@ function matchesDiscordBotMention(text, ids = []) {
   return ids.some((id) => new RegExp(String.raw`<@!?${escapeRegExp(id)}>`, "i").test(text));
 }
 
+function replyTargetAuthorId(event = {}, ctx = {}) {
+  const metadata = event?.metadata && typeof event.metadata === "object" ? event.metadata : {};
+  const discordMetadata = firstObject(metadata.discord, metadata.channelData?.discord, event.channelData?.discord, ctx.channelData?.discord);
+  const referenced = firstObject(
+    event.referenced_message,
+    event.referencedMessage,
+    event.messageReference?.referencedMessage,
+    event.message_reference?.referenced_message,
+    metadata.referenced_message,
+    metadata.referencedMessage,
+    metadata.messageReference?.referencedMessage,
+    metadata.message_reference?.referenced_message,
+    metadata.message?.referenced_message,
+    metadata.message?.referencedMessage,
+    discordMetadata?.referenced_message,
+    discordMetadata?.referencedMessage
+  );
+  return textValue(
+    event.replyToAuthorId,
+    event.reply_to_author_id,
+    event.replyToUserId,
+    event.reply_to_user_id,
+    event.replyTo?.authorId,
+    event.replyTo?.author?.id,
+    metadata.replyToAuthorId,
+    metadata.reply_to_author_id,
+    metadata.replyToUserId,
+    metadata.reply_to_user_id,
+    metadata.replyTo?.authorId,
+    metadata.replyTo?.author?.id,
+    discordMetadata?.replyToAuthorId,
+    discordMetadata?.reply_to_author_id,
+    discordMetadata?.referencedMessageAuthorId,
+    discordMetadata?.referenced_message_author_id,
+    referenced?.authorId,
+    referenced?.author_id,
+    referenced?.senderId,
+    referenced?.sender_id,
+    referenced?.author?.id,
+    ctx.replyToAuthorId,
+    ctx.reply_to_author_id,
+    ctx.metadata?.replyToAuthorId,
+    ctx.metadata?.reply_to_author_id
+  );
+}
+
+export function deriveNativeReplyMentionFact(event = {}, ctx = {}, cfg = {}, pluginConfig = {}) {
+  const authorId = replyTargetAuthorId(event, ctx);
+  if (!authorId) return undefined;
+  const accountId = textValue(ctx.accountId, event.accountId, event.metadata?.accountId, "default");
+  return configuredBotIds(cfg, pluginConfig, accountId).includes(authorId) ? true : undefined;
+}
+
 export function deriveMentionFact(event = {}, ctx = {}, cfg = {}, pluginConfig = {}) {
+  const replyMention = deriveNativeReplyMentionFact(event, ctx, cfg, pluginConfig);
+  if (typeof replyMention === "boolean") return replyMention;
+
   const text = messageText(event, ctx);
   if (!text) return undefined;
   const accountId = textValue(ctx.accountId, event.accountId, event.metadata?.accountId, "default");
