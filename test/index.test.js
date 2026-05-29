@@ -38,6 +38,16 @@ test("native reply handling adds Discord replyTo from dispatch context", () => {
   assert.deepEqual(result, { replyTo: "source-message-1" });
 });
 
+test("native reply handling accepts Discord guild context without Discord session key", () => {
+  const result = applyNativeReplyHandling({}, {
+    sessionKey: "agent:main:tirrenia-runtime",
+    guildId: "guild-1",
+    trigger: { messageId: "source-message-1" }
+  }, normalizeNativeReplyHandling());
+
+  assert.deepEqual(result, { replyTo: "source-message-1" });
+});
+
 test("native reply handling preserves explicit outbound reply target", () => {
   const result = applyNativeReplyHandling({ replyTo: "explicit-message" }, {
     sessionKey: "agent:main:discord:channel:room-1",

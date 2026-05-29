@@ -33,7 +33,9 @@ function platformFromContext(ctx = {}) {
 function isDiscordContext(ctx = {}) {
   const platform = platformFromContext(ctx);
   if (platform === "discord") return true;
-  return /(^|:)discord(:|$)/i.test(firstString(ctx.SessionKey, ctx.sessionKey));
+  if (/(^|:)discord(:|$)/i.test(firstString(ctx.SessionKey, ctx.sessionKey))) return true;
+  if (firstString(ctx.guildId, ctx.GuildId, ctx.rawGuildId, ctx.GroupSpace)) return true;
+  return false;
 }
 
 function outboundReplyTarget(event = {}) {
@@ -68,7 +70,13 @@ function sourceReplyTarget(ctx = {}) {
     ctx.metadata?.inboundMessageId,
     ctx.metadata?.sourceMessageId,
     ctx.metadata?.triggerMessageId,
-    ctx.metadata?.messageId
+    ctx.metadata?.messageId,
+    ctx.source?.messageId,
+    ctx.source?.id,
+    ctx.inbound?.messageId,
+    ctx.inbound?.id,
+    ctx.trigger?.messageId,
+    ctx.trigger?.id
   );
 }
 
