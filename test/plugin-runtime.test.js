@@ -458,7 +458,7 @@ test("golden flow: configured plain bot name satisfies requireMention policy", a
     mentionDetection: {
       accounts: {
         default: {
-          names: ["Karan S'Jet"]
+          names: ["Policy Bot"]
         }
       }
     }
@@ -466,7 +466,7 @@ test("golden flow: configured plain bot name satisfies requireMention policy", a
 
   const event = {
     messageId: "msg-name-mention",
-    content: "Karan S'Jet puoi controllare?",
+    content: "Policy Bot can you check this?",
     timestamp: Date.now()
   };
   const ctx = {
