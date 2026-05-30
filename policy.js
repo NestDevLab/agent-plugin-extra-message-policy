@@ -236,7 +236,7 @@ export function ruleMatches(rule, event = {}, ctx = {}) {
     ctxValue(ctx, event, "SenderId")
   ].includes(rule.senderId)) return false;
   if (typeof rule.isGroup === "boolean") {
-    const value = event?.isGroup;
+    const value = groupBoolean(event, ctx);
     if (typeof value !== "boolean" || value !== rule.isGroup) return false;
   }
 
@@ -284,6 +284,25 @@ function firstBoolean(...values) {
   return undefined;
 }
 
+function groupBoolean(event = {}, ctx = {}) {
+  const metadata = event?.metadata && typeof event.metadata === "object" ? event.metadata : {};
+  const ctxMetadata = ctx?.metadata && typeof ctx.metadata === "object" ? ctx.metadata : {};
+  return firstBoolean(
+    event.isGroup,
+    event.IsGroup,
+    event.is_group,
+    ctx.isGroup,
+    ctx.IsGroup,
+    ctx.is_group,
+    metadata.isGroup,
+    metadata.IsGroup,
+    metadata.is_group,
+    ctxMetadata.isGroup,
+    ctxMetadata.IsGroup,
+    ctxMetadata.is_group
+  );
+}
+
 function nestedValue(obj, path) {
   let cursor = obj;
   for (const key of path) {
@@ -297,8 +316,14 @@ export function wasMentioned(event = {}, ctx = {}, policy = {}) {
   const metadata = event?.metadata && typeof event.metadata === "object" ? event.metadata : {};
   const explicit = firstBoolean(
     event.wasMentioned,
+    event.WasMentioned,
+    event.was_mentioned,
     ctx.wasMentioned,
+    ctx.WasMentioned,
+    ctx.was_mentioned,
     metadata.wasMentioned,
+    metadata.WasMentioned,
+    metadata.was_mentioned,
     metadata.mentioned,
     nestedValue(metadata, ["mention", "wasMentioned"]),
     nestedValue(metadata, ["mentions", "wasMentioned"]),

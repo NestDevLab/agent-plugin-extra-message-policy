@@ -1,11 +1,11 @@
 function mentionFactKeys(event = {}, ctx = {}) {
   const keys = new Set();
-  const sessionKey = event.sessionKey || ctx.sessionKey;
-  const accountId = event.accountId || ctx.accountId || "";
-  const conversationId = event.conversationId || ctx.conversationId || "";
-  const channelId = event.channel || event.channelId || ctx.channelId || "";
-  const senderId = event.senderId || ctx.senderId || "";
-  const messageId = event.messageId || ctx.messageId || "";
+  const sessionKey = event.sessionKey || event.SessionKey || ctx.sessionKey || ctx.SessionKey;
+  const accountId = event.accountId || event.AccountId || ctx.accountId || ctx.AccountId || "";
+  const conversationId = event.conversationId || event.OriginatingTo || event.To || ctx.conversationId || ctx.OriginatingTo || ctx.To || "";
+  const channelId = event.channel || event.channelId || event.ChannelId || event.NativeChannelId || ctx.channelId || ctx.ChannelId || ctx.NativeChannelId || "";
+  const senderId = event.senderId || event.SenderId || ctx.senderId || ctx.SenderId || "";
+  const messageId = event.messageId || event.MessageId || ctx.messageId || ctx.MessageId || "";
   if (messageId) keys.add(`message:${messageId}`);
   if (sessionKey) keys.add(`session:${sessionKey}`);
   if (accountId || conversationId || senderId) keys.add(`scope:${accountId}:${conversationId}:${senderId}`);
@@ -23,9 +23,17 @@ export function pruneMentionFacts(state, now = Date.now(), ttlMs = 120000) {
 export function rememberMentionFact(state, event = {}, ctx = {}) {
   const mentioned = typeof event.wasMentioned === "boolean"
     ? event.wasMentioned
+    : typeof event.WasMentioned === "boolean"
+      ? event.WasMentioned
+      : typeof event.was_mentioned === "boolean"
+        ? event.was_mentioned
     : typeof ctx.wasMentioned === "boolean"
       ? ctx.wasMentioned
-      : undefined;
+      : typeof ctx.WasMentioned === "boolean"
+        ? ctx.WasMentioned
+        : typeof ctx.was_mentioned === "boolean"
+          ? ctx.was_mentioned
+          : undefined;
   if (typeof mentioned !== "boolean") return;
   const now = Date.now();
   pruneMentionFacts(state, now);
@@ -44,7 +52,14 @@ export function recalledMentionFact(state, event = {}, ctx = {}) {
 }
 
 export function withRecalledMentionFact(state, event = {}, ctx = {}) {
-  if (typeof event.wasMentioned === "boolean" || typeof ctx.wasMentioned === "boolean") {
+  if (
+    typeof event.wasMentioned === "boolean"
+    || typeof event.WasMentioned === "boolean"
+    || typeof event.was_mentioned === "boolean"
+    || typeof ctx.wasMentioned === "boolean"
+    || typeof ctx.WasMentioned === "boolean"
+    || typeof ctx.was_mentioned === "boolean"
+  ) {
     return { event, ctx };
   }
   const mentioned = recalledMentionFact(state, event, ctx);

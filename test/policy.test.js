@@ -224,6 +224,37 @@ test("DM sender rules allow authorized non-group responders", () => {
   });
 });
 
+test("group/DM policy matches runtime and metadata group aliases", () => {
+  const cfg = normalizeConfig({
+    defaultPolicy: { respond: false, ingestMode: "none" },
+    policies: [
+      { isGroup: true, respond: false, ingestMode: "all" },
+      { isGroup: false, senderId: "operator", respond: true, ingestMode: "all" }
+    ]
+  });
+
+  assert.deepEqual(resolvePolicy(cfg, {}, {
+    IsGroup: false,
+    SenderId: "operator",
+    sessionKey: "agent:main:discord:user:operator"
+  }), {
+    respond: true,
+    ingestMode: "all",
+    matched: "senderId:operator,isGroup:false"
+  });
+
+  assert.deepEqual(resolvePolicy(cfg, {
+    metadata: { is_group: true },
+    SenderId: "operator"
+  }, {
+    sessionKey: "agent:main:telegram:group:-100123"
+  }), {
+    respond: false,
+    ingestMode: "all",
+    matched: "isGroup:true"
+  });
+});
+
 test("invalid regex rules fail closed by not matching", () => {
   const cfg = normalizeConfig({
     defaultPolicy: { respond: true, ingestMode: "responseCandidates" },

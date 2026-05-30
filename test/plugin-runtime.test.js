@@ -547,6 +547,49 @@ test("golden flow: Discord runtime-shaped context suppresses unmentioned replies
   assert.deepEqual(outbound, { cancel: true });
 });
 
+test("golden flow: runtime mention fact survives uppercase inbound fields", async () => {
+  const harness = await createHarness({
+    defaultPolicy: { respond: true, ingestMode: "all" },
+    policies: [
+      { channelId: "uppercase-mention", respond: true, ingestMode: "all", requireMention: true }
+    ]
+  });
+
+  await harness.emit("inbound_claim", {
+    MessageId: "msg-uppercase-mention",
+    WasMentioned: true,
+    content: "bot was addressed"
+  }, {
+    AccountId: "default",
+    GroupSpace: "guild-1",
+    ChannelId: "uppercase-mention",
+    OriginatingTo: "channel:uppercase-mention",
+    SessionKey: "agent:main:discord:channel:uppercase-mention",
+    SenderId: "user-1",
+    MessageId: "msg-uppercase-mention",
+    WasMentioned: true
+  });
+
+  const dispatch = await harness.emit("before_dispatch", {
+    MessageId: "msg-uppercase-mention",
+    content: "bot was addressed"
+  }, {
+    AccountId: "default",
+    GroupSpace: "guild-1",
+    ChannelId: "uppercase-mention",
+    OriginatingTo: "channel:uppercase-mention",
+    SessionKey: "agent:main:discord:channel:uppercase-mention",
+    SenderId: "user-1",
+    MessageId: "msg-uppercase-mention"
+  });
+  const outbound = await harness.emit("message_sending", { content: "should not send" }, {
+    MessageId: "msg-uppercase-mention"
+  });
+
+  assert.equal(dispatch, undefined);
+  assert.equal(outbound, undefined);
+});
+
 test("golden flow: runtime always override matches Discord runtime-shaped context", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "extra-message-policy-runtime-shaped-"));
   const statePath = path.join(root, "policy-state.json");
