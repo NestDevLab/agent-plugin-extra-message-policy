@@ -108,6 +108,14 @@ function stripConversationPrefix(value) {
   return String(value || "").replace(/^(channel|chat|user):/, "");
 }
 
+function metadataValues(ctx = {}, event = {}, keys = []) {
+  const values = [];
+  for (const key of keys) {
+    values.push(ctx?.[key], event?.[key], ctx?.metadata?.[key], event?.metadata?.[key]);
+  }
+  return values;
+}
+
 function channelIdValues(ctx = {}, event = {}) {
   const exact = new Set();
   const parent = new Set();
@@ -119,7 +127,8 @@ function channelIdValues(ctx = {}, event = {}) {
     event?.metadata?.channelId,
     event?.metadata?.channel_id,
     ctx?.metadata?.channelId,
-    ctx?.metadata?.channel_id
+    ctx?.metadata?.channel_id,
+    ...metadataValues(ctx, event, ["chatId", "chat_id", "to", "from", "conversationId"])
   ]) {
     const text = stripConversationPrefix(String(value || "").trim());
     if (text) exact.add(text);
@@ -170,7 +179,8 @@ function conversationValues(ctx = {}, event = {}) {
     event?.metadata?.originatingTo,
     event?.metadata?.threadId,
     ctx?.threadId,
-    event?.threadId
+    event?.threadId,
+    ...metadataValues(ctx, event, ["channelId", "channel_id", "chatId", "chat_id", "to", "from"])
   ]) {
     const text = String(value || "").trim();
     if (!text) continue;

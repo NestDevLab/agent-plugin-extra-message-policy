@@ -256,6 +256,30 @@ test("runtime scope matches saved channel override when guild is missing", () =>
   assert.equal(override.runtimeMatchedScope.guildId, "guild-1");
 });
 
+test("runtime scope uses Telegram platform and chat id", () => {
+  const commandConfig = normalizePolicyCommandConfig({});
+  const result = applyRuntimeCommand(commandConfig, {}, {
+    chatId: "-100123"
+  }, {
+    accountId: "default",
+    platform: "telegram",
+    sessionKey: "agent:main:telegram:group:-100123"
+  }, parsePolicyCommand("response mention"), "operator");
+
+  assert.deepEqual(Object.keys(result.state.scopes), ["telegram:default:-:-100123"]);
+  assert.equal(result.scope.platform, "telegram");
+  assert.equal(result.scope.conversationId, "-100123");
+
+  const override = resolveRuntimePolicyOverride(commandConfig, result.state, {}, {
+    accountId: "default",
+    sessionKey: "agent:main:telegram:group:-100123",
+    metadata: { chat_id: "-100123" }
+  });
+
+  assert.equal(override.runtimeResponseMode, "mention");
+  assert.equal(override.runtimeMatched, "telegram:default:-:-100123");
+});
+
 test("native requireMention target uses account-scoped Discord config", () => {
   const cfg = {
     channels: {

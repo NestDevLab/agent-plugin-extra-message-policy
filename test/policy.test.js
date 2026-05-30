@@ -130,6 +130,32 @@ test("thread inherits parent channel policy unless thread has its own policy", (
   });
 });
 
+test("Telegram chat aliases match channel and conversation policies", () => {
+  const cfg = normalizeConfig({
+    defaultPolicy: { respond: true, ingestMode: "all" },
+    policies: [
+      { channelId: "-100123", respond: false, ingestMode: "all" },
+      { conversationId: "-100456", respond: false, ingestMode: "none" }
+    ]
+  });
+
+  assert.deepEqual(resolvePolicy(cfg, { metadata: { chat_id: "-100123" } }, {
+    sessionKey: "agent:main:telegram:group:-100123"
+  }), {
+    respond: false,
+    ingestMode: "all",
+    matched: "channelId:-100123"
+  });
+
+  assert.deepEqual(resolvePolicy(cfg, { chatId: "-100456" }, {
+    platform: "telegram"
+  }), {
+    respond: false,
+    ingestMode: "none",
+    matched: "conversationId:-100456"
+  });
+});
+
 test("conversation policy wins over channel policy regardless of order", () => {
   const cfg = normalizeConfig({
     policies: [

@@ -44,6 +44,7 @@ function parentChannelValue(...values) {
 
 function encodeDashboardScope(scope = {}) {
   const compact = {
+    f: scope.platform || "",
     a: scope.accountId || "",
     g: scope.guildId || "",
     c: scope.channelId || "",
@@ -58,6 +59,7 @@ function decodeDashboardScope(raw) {
     const parsed = JSON.parse(Buffer.from(String(raw || ""), "base64url").toString("utf8"));
     if (!parsed || typeof parsed !== "object") return null;
     return {
+      platform: textValue(parsed.f),
       accountId: textValue(parsed.a),
       guildId: textValue(parsed.g),
       channelId: textValue(parsed.c),
@@ -75,6 +77,7 @@ export function contextFromPolicyScope(scope = {}, fallback = {}) {
   const parentChannelId = textValue(scope.parentChannelId, scope.channelId, fallback.parentChannelId, fallback.parentConversationId);
   return {
     ...fallback,
+    platform: textValue(scope.platform, fallback.platform),
     accountId: textValue(scope.accountId, fallback.accountId),
     guildId: textValue(scope.guildId, fallback.guildId, fallback.rawGuildId),
     rawGuildId: textValue(scope.guildId, fallback.rawGuildId, fallback.guildId),
@@ -84,6 +87,7 @@ export function contextFromPolicyScope(scope = {}, fallback = {}) {
     parentConversationId: parentChannelId,
     metadata: {
       ...(fallback.metadata || {}),
+      platform: textValue(scope.platform, fallback.metadata?.platform),
       accountId: textValue(scope.accountId, fallback.metadata?.accountId),
       guildId: textValue(scope.guildId, fallback.metadata?.guildId),
       channelId,
@@ -126,6 +130,29 @@ function discordSessionScope(...values) {
     if (scope.guildId || scope.channelId) return scope;
   }
   return {};
+}
+
+function platformFromContext(event = {}, ctx = {}) {
+  const explicit = textValue(
+    ctx.platform,
+    ctx.provider,
+    ctx.surface,
+    event.platform,
+    event.provider,
+    event.surface,
+    ctx.metadata?.platform,
+    ctx.metadata?.provider,
+    event.metadata?.platform,
+    event.metadata?.provider
+  ).toLowerCase();
+  if (explicit.includes("telegram")) return "telegram";
+  if (explicit.includes("discord")) return "discord";
+
+  const sessionKey = textValue(ctx.sessionKey, ctx.message?.sessionKey, ctx.metadata?.sessionKey, event.sessionKey, event.metadata?.sessionKey).toLowerCase();
+  if (sessionKey.includes("telegram:")) return "telegram";
+  if (sessionKey.includes("discord:")) return "discord";
+
+  return "discord";
 }
 
 function normalizeResponseMode(value, fallback = DEFAULT_RUNTIME_POLICY.responseMode) {
@@ -195,6 +222,7 @@ export async function savePolicyState(filePath, state) {
 }
 
 export function scopeFromContext(event = {}, ctx = {}) {
+  const platform = platformFromContext(event, ctx);
   const sessionScope = discordSessionScope(
     ctx.sessionKey,
     ctx.message?.sessionKey,
@@ -203,7 +231,7 @@ export function scopeFromContext(event = {}, ctx = {}) {
     event.metadata?.sessionKey
   );
   const accountId = textValue(ctx.accountId, event.accountId, event.metadata?.accountId, "default");
-  const guildId = textValue(
+  const guildId = platform === "discord" ? textValue(
     ctx.guildId,
     ctx.rawGuildId,
     ctx.GroupSpace,
@@ -221,7 +249,7 @@ export function scopeFromContext(event = {}, ctx = {}) {
     event.metadata?.guildId,
     event.metadata?.guild_id,
     sessionScope.guildId
-  );
+  ) : "";
   const directChannelId = textValue(
     ctx.threadId,
     ctx.messageThreadId,
@@ -281,7 +309,15 @@ export function scopeFromContext(event = {}, ctx = {}) {
   const rawConversationId = nonSlashValue(
     ctx.conversationId,
     event.conversationId,
-    event.metadata?.to
+    event.metadata?.to,
+    ctx.chatId,
+    ctx.chat_id,
+    event.chatId,
+    event.chat_id,
+    ctx.metadata?.chatId,
+    ctx.metadata?.chat_id,
+    event.metadata?.chatId,
+    event.metadata?.chat_id
   );
   const rawTarget = nonSlashValue(
     ctx.To,
@@ -291,7 +327,10 @@ export function scopeFromContext(event = {}, ctx = {}) {
     ctx.raw?.channelId,
     ctx.raw?.channel_id,
     event.raw?.channelId,
-    event.raw?.channel_id
+    event.raw?.channel_id,
+    event.to,
+    event.from,
+    event.metadata?.from
   );
   const conversationId = stripConversationPrefix(
     directChannelId || rawConversationId || rawTarget
@@ -313,20 +352,29 @@ export function scopeFromContext(event = {}, ctx = {}) {
     event.raw?.channel_id,
     event.metadata?.channelId,
     event.metadata?.channel_id,
+    ctx.chatId,
+    ctx.chat_id,
+    event.chatId,
+    event.chat_id,
+    ctx.metadata?.chatId,
+    ctx.metadata?.chat_id,
+    event.metadata?.chatId,
+    event.metadata?.chat_id,
     sessionScope.channelId
   ));
   return {
+    platform,
     accountId,
     guildId,
     channelId,
     parentChannelId,
     conversationId,
-    key: ["discord", accountId || "default", guildId || "-", conversationId || channelId || "-"].join(":")
+    key: [platform, accountId || "default", guildId || "-", conversationId || channelId || "-"].join(":")
   };
 }
 
 function runtimeScopeKey(scope = {}, zoneId) {
-  return ["discord", scope.accountId || "default", scope.guildId || "-", zoneId || "-"].join(":");
+  return [scope.platform || "discord", scope.accountId || "default", scope.guildId || "-", zoneId || "-"].join(":");
 }
 
 function runtimeScopeCandidates(scope = {}) {
@@ -355,9 +403,10 @@ function runtimeScopeCandidates(scope = {}) {
 
 function scopeWithGuildFromRuntimeKey(scope, key) {
   const parts = String(key || "").split(":");
-  if (parts.length < 4 || parts[0] !== "discord") return scope;
+  if (parts.length < 4) return scope;
   return {
     ...scope,
+    platform: parts[0] || scope.platform,
     accountId: parts[1] || scope.accountId,
     guildId: parts[2] === "-" ? "" : parts[2]
   };
@@ -377,8 +426,9 @@ function findRuntimeScopeEntry(normalizedState, candidate) {
   const zoneId = candidate.scope?.conversationId || candidate.scope?.channelId || "";
   if (!zoneId || candidate.scope?.guildId) return null;
 
+  const platform = candidate.scope?.platform || "discord";
   const accountId = candidate.scope?.accountId || "default";
-  const prefix = `discord:${accountId}:`;
+  const prefix = `${platform}:${accountId}:`;
   const suffix = `:${zoneId}`;
   const matches = Object.entries(normalizedState.scopes).filter(([key, value]) => (
     key.startsWith(prefix)
