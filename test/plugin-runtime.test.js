@@ -205,3 +205,284 @@ test("golden flow: runtime always override forces reply context over suppressed 
     /forced reply context/
   );
 });
+
+test("golden flow: runtime always override beats native Discord requireMention gate", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "extra-message-policy-native-runtime-"));
+  const statePath = path.join(root, "policy-state.json");
+  await writeFile(statePath, JSON.stringify({
+    scopes: {
+      "discord:default:guild-1:thread-native": {
+        policy: {
+          responseMode: "always",
+          ingestMode: "all"
+        }
+      }
+    }
+  }), "utf8");
+
+  const harness = await createHarness({
+    defaultPolicy: { respond: true, ingestMode: "all" },
+    policyCommand: { statePath }
+  }, {
+    channels: {
+      discord: {
+        accounts: {
+          default: {
+            guilds: {
+              "guild-1": {
+                channels: {
+                  "thread-native": { requireMention: true }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  const event = {
+    messageId: "msg-native-rt",
+    content: "not a mention",
+    timestamp: Date.now()
+  };
+  const ctx = {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "thread-native",
+    conversationId: "channel:thread-native",
+    sessionKey: "agent:main:discord:channel:thread-native",
+    senderId: "user-1",
+    messageId: "msg-native-rt",
+    wasMentioned: false
+  };
+
+  const dispatch = await harness.emit("before_dispatch", event, ctx);
+  const outbound = await harness.emit("message_sending", { content: "reply" }, ctx);
+
+  assert.equal(dispatch, undefined);
+  assert.deepEqual(outbound, { replyTo: "msg-native-rt" });
+});
+
+test("golden flow: new Discord subthread inherits parent runtime always override", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "extra-message-policy-parent-runtime-"));
+  const statePath = path.join(root, "policy-state.json");
+  await writeFile(statePath, JSON.stringify({
+    scopes: {
+      "discord:default:guild-1:forum-parent": {
+        policy: {
+          responseMode: "always",
+          ingestMode: "all"
+        }
+      }
+    }
+  }), "utf8");
+
+  const harness = await createHarness({
+    defaultPolicy: { respond: false, ingestMode: "all" },
+    policyCommand: { statePath },
+    policies: [
+      { channelId: "forum-parent", respond: false, ingestMode: "all" }
+    ]
+  });
+
+  const event = {
+    messageId: "msg-child-inherit",
+    content: "new subthread message",
+    timestamp: Date.now(),
+    metadata: { parent_id: "forum-parent" }
+  };
+  const ctx = {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "new-subthread",
+    conversationId: "channel:new-subthread",
+    sessionKey: "agent:main:discord:channel:new-subthread",
+    senderId: "user-1",
+    messageId: "msg-child-inherit",
+    metadata: { parent_id: "forum-parent" }
+  };
+  const replyDispatchEvent = {
+    ctx: {
+      AccountId: "default",
+      GroupSpace: "guild-1",
+      ChannelId: "new-subthread",
+      ParentId: "forum-parent",
+      OriginatingTo: "channel:new-subthread",
+      SessionKey: "agent:main:discord:channel:new-subthread",
+      SenderId: "user-1",
+      BodyForAgent: "new subthread message",
+      messageId: "msg-child-inherit"
+    }
+  };
+
+  const dispatch = await harness.emit("before_dispatch", event, ctx);
+  await harness.emit("reply_dispatch", replyDispatchEvent);
+  const outbound = await harness.emit("message_sending", { content: "reply" }, ctx);
+
+  assert.equal(dispatch, undefined);
+  assert.equal(replyDispatchEvent.ctx.WasMentioned, true);
+  assert.deepEqual(outbound, { replyTo: "msg-child-inherit" });
+});
+
+test("golden flow: Telegram topic session is suppressed by group chat policy", async () => {
+  const jsonlPath = path.join(os.tmpdir(), `extra-policy-${Date.now()}-telegram-topic.jsonl`);
+  const harness = await createHarness({
+    defaultPolicy: { respond: true, ingestMode: "all" },
+    policies: [
+      { channelId: "-1003890952306", respond: false, ingestMode: "all" }
+    ],
+    jsonlSink: { enabled: true, path: jsonlPath }
+  });
+
+  const event = {
+    messageId: "tg-topic-1",
+    content: "topic message",
+    chat_id: "-1003890952306",
+    metadata: {
+      chat_id: "-1003890952306",
+      message_thread_id: "724"
+    },
+    timestamp: Date.now()
+  };
+  const ctx = {
+    accountId: "default",
+    platform: "telegram",
+    chat_id: "-1003890952306",
+    conversationId: "-1003890952306",
+    sessionKey: "agent:main:telegram:group:-1003890952306:topic:724",
+    senderId: "user-1",
+    messageId: "tg-topic-1",
+    metadata: {
+      chat_id: "-1003890952306",
+      message_thread_id: "724"
+    }
+  };
+
+  await harness.emit("message_received", event, ctx);
+  const dispatch = await harness.emit("before_dispatch", event, ctx);
+  const outbound = await harness.emit("message_sending", { content: "suppressed reply" }, ctx);
+
+  assert.deepEqual(dispatch, { handled: true });
+  assert.deepEqual(outbound, { cancel: true });
+
+  const rows = await readJsonl(jsonlPath);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].sessionKey, "agent:main:telegram:group:-1003890952306:topic:724");
+  assert.equal(rows[0].policy.matched, "channelId:-1003890952306");
+});
+
+test("golden flow: Discord reply to bot satisfies requireMention policy", async () => {
+  const harness = await createHarness({
+    defaultPolicy: { respond: false, ingestMode: "all" },
+    policies: [
+      {
+        channelId: "reply-channel",
+        respond: true,
+        ingestMode: "all",
+        requireMention: true
+      }
+    ],
+    mentionDetection: {
+      accounts: {
+        default: {
+          botIds: ["1494581796120301598"]
+        }
+      }
+    }
+  });
+
+  const event = {
+    messageId: "msg-reply-mention",
+    content: "yes, continue",
+    metadata: {
+      referenced_message: {
+        author: { id: "1494581796120301598" }
+      }
+    },
+    timestamp: Date.now()
+  };
+  const ctx = {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "reply-channel",
+    conversationId: "channel:reply-channel",
+    sessionKey: "agent:main:discord:channel:reply-channel",
+    senderId: "user-1",
+    messageId: "msg-reply-mention"
+  };
+
+  const dispatch = await harness.emit("before_dispatch", event, ctx);
+  const outbound = await harness.emit("message_sending", { content: "reply" }, ctx);
+
+  assert.equal(dispatch, undefined);
+  assert.deepEqual(outbound, { replyTo: "msg-reply-mention" });
+});
+
+test("golden flow: configured plain bot name satisfies requireMention policy", async () => {
+  const harness = await createHarness({
+    defaultPolicy: { respond: false, ingestMode: "all" },
+    policies: [
+      {
+        channelId: "name-channel",
+        respond: true,
+        ingestMode: "all",
+        requireMention: true
+      }
+    ],
+    mentionDetection: {
+      accounts: {
+        default: {
+          names: ["Karan S'Jet"]
+        }
+      }
+    }
+  });
+
+  const event = {
+    messageId: "msg-name-mention",
+    content: "Karan S'Jet puoi controllare?",
+    timestamp: Date.now()
+  };
+  const ctx = {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "name-channel",
+    conversationId: "channel:name-channel",
+    sessionKey: "agent:main:discord:channel:name-channel",
+    senderId: "user-1",
+    messageId: "msg-name-mention"
+  };
+
+  const dispatch = await harness.emit("before_dispatch", event, ctx);
+  const outbound = await harness.emit("message_sending", { content: "reply" }, ctx);
+
+  assert.equal(dispatch, undefined);
+  assert.deepEqual(outbound, { replyTo: "msg-name-mention" });
+});
+
+test("golden flow: approval prompt replacement preserves native Discord reply target", async () => {
+  const harness = await createHarness({
+    defaultPolicy: { respond: true, ingestMode: "all" },
+    approvalPromptHandling: {
+      mode: "replace",
+      replacementText: "NO_REPLY"
+    }
+  });
+
+  const outbound = await harness.emit("message_sending", {
+    content: "approval-pending\nUse:\n`/approve abc123`"
+  }, {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "approval-channel",
+    conversationId: "channel:approval-channel",
+    sessionKey: "agent:main:discord:channel:approval-channel",
+    messageId: "msg-approval-source"
+  });
+
+  assert.deepEqual(outbound, {
+    replyTo: "msg-approval-source",
+    content: "NO_REPLY"
+  });
+});
