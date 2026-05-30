@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { normalizeConfig, resolvePolicy, shouldIngest, shouldSuppressResponse } from "../policy.js";
+import { describeRule, normalizeConfig, normalizeIngestMode, normalizePolicy, normalizePolicyRule, resolvePolicy, ruleMatches, shouldIngest, shouldSuppressResponse, wasMentioned } from "../policy.js";
 
 test("allowing rule by channel overrides default silent policy", () => {
   const cfg = normalizeConfig({
@@ -237,4 +237,49 @@ test("invalid regex rules fail closed by not matching", () => {
     ingestMode: "responseCandidates",
     matched: "default"
   });
+});
+
+test("normalizers handle fallback values, disabled config, sinks, and anonymous rules", () => {
+  assert.equal(normalizeIngestMode("bad", "all"), "all");
+  assert.deepEqual(normalizePolicy({ respond: "yes", ingestMode: "bad" }, { respond: false, ingestMode: "none", requireMention: true }), {
+    respond: false,
+    ingestMode: "none",
+    requireMention: true
+  });
+  assert.deepEqual(normalizePolicyRule({ isGroup: "true", channelId: 123 }, { respond: true, ingestMode: "all" }).isGroup, undefined);
+  assert.equal(describeRule({}), "anonymous-rule");
+
+  const cfg = normalizeConfig({
+    enabled: false,
+    policies: [null, { respond: false }],
+    jsonlSink: { enabled: true, path: "custom.jsonl", shardBy: "invalid" },
+    httpSink: { enabled: true, url: " https://example.invalid ", accessToken: " token " },
+    dedupeWindow: -1
+  });
+  assert.equal(cfg.enabled, false);
+  assert.equal(cfg.policies.length, 1);
+  assert.equal(cfg.jsonlSink.shardBy, "none");
+  assert.equal(cfg.httpSink.url, "https://example.invalid");
+  assert.equal(cfg.dedupeWindow, 1);
+});
+
+test("rule matching covers metadata aliases, prefixes, regexes, text regexes, and failures", () => {
+  assert.equal(ruleMatches({ guildId: "guild-meta" }, {}, { metadata: { guildId: "guild-meta" } }), true);
+  assert.equal(ruleMatches({ guildId: "guild-meta" }, {}, { metadata: { guildId: "other" } }), false);
+  assert.equal(ruleMatches({ accountId: "acct" }, {}, { AccountId: "acct" }), true);
+  assert.equal(ruleMatches({ senderId: "sender" }, {}, { SenderId: "sender" }), true);
+  assert.equal(ruleMatches({ conversationIdPrefix: "channel:" }, { metadata: { to: "channel:abc" } }, {}), true);
+  assert.equal(ruleMatches({ conversationIdRegex: "^thread-[0-9]+$" }, { threadId: "thread-42" }, {}), true);
+  assert.equal(ruleMatches({ conversationIdRegex: "[" }, { threadId: "thread-42" }, {}), false);
+  assert.equal(ruleMatches({ sessionKeyRegex: "discord:channel" }, {}, { SessionKey: "agent:main:discord:channel:1" }), true);
+  assert.equal(ruleMatches({ sessionKeyIncludes: "telegram:" }, {}, { sessionKey: "agent:main:discord:channel:1" }), false);
+  assert.equal(ruleMatches({ isGroup: true }, { isGroup: "yes" }, {}), false);
+});
+
+test("mention detection covers metadata booleans, regex text sources, and invalid regexes", () => {
+  assert.equal(wasMentioned({ metadata: { mentioned: true } }, {}, {}), true);
+  assert.equal(wasMentioned({ metadata: { mention: { wasMentioned: false } } }, {}, {}), false);
+  assert.equal(wasMentioned({ metadata: { caption: "hello bot" } }, {}, { mentionTextRegex: "hello bot" }), true);
+  assert.equal(wasMentioned({ content: "hello bot" }, {}, { mentionTextRegex: "[" }), undefined);
+  assert.equal(wasMentioned({}, { message: "ctx bot" }, { mentionTextRegex: "ctx bot" }), true);
 });

@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import {
   applyNativeRequireMentionOverride,
@@ -7,14 +10,21 @@ import {
   applyRuntimePolicy,
   buildPolicyDashboardView,
   contextFromPolicyScope,
+  defaultPolicyStatePath,
+  applyNativeRequireMentionCommand,
   normalizePolicyCommandConfig,
+  normalizePolicyState,
   policyDashboardAccountsFromConfig,
   parsePolicyDashboardAction,
   parsePolicyCommand,
+  renderNativeRequireMentionStatus,
   renderPolicyStatus,
   resolveNativeRequireMentionStatus,
   resolveNativeRequireMentionTarget,
   resolveRuntimePolicyOverride,
+  savePolicyState,
+  loadPolicyState,
+  scopeFromContext,
   validateRuntimeResponseAction
 } from "../policy-command.js";
 import { normalizeConfig, resolvePolicy } from "../policy.js";
@@ -660,4 +670,184 @@ test("details button toggles technical details", () => {
   assert.match(view.text, /Details/);
   assert.match(view.text, /Panel state: \/tmp\/policy-state\.json/);
   assert.ok(buttons.some((entry) => entry.callbackData.startsWith("policy:details:hide:")));
+});
+
+test("command parser covers aliases and unknown input", () => {
+  assert.deepEqual(parsePolicyCommand("show"), { action: "status" });
+  assert.deepEqual(parsePolicyCommand("clear"), { action: "reset" });
+  assert.deepEqual(parsePolicyCommand("reply always"), { action: "set-response", value: "always" });
+  assert.deepEqual(parsePolicyCommand("respond off"), { action: "set-response", value: "off" });
+  assert.deepEqual(parsePolicyCommand("read all"), { action: "set-ingest", value: "all" });
+  assert.deepEqual(parsePolicyCommand("require-mention on"), { action: "set-native-require", value: "on" });
+  assert.deepEqual(parsePolicyCommand("config off"), { action: "set-native-require", value: "off" });
+  assert.deepEqual(parsePolicyCommand("wat"), { action: "help" });
+});
+
+test("dashboard action parser covers every action and bad scopes", () => {
+  assert.deepEqual(parsePolicyDashboardAction("refresh:_:"), { action: "status", scope: null });
+  assert.deepEqual(parsePolicyDashboardAction("details:hide:not-json"), {
+    action: "details",
+    value: "hide",
+    scope: null,
+    details: false
+  });
+  assert.deepEqual(parsePolicyDashboardAction("reset:_:"), { action: "reset", scope: null });
+  assert.deepEqual(parsePolicyDashboardAction("response:mention:"), { action: "set-response", value: "mention", scope: null });
+  assert.deepEqual(parsePolicyDashboardAction("ingest:passive:"), { action: "set-ingest", value: "passive", scope: null });
+  assert.deepEqual(parsePolicyDashboardAction("native:on:"), { action: "set-native-require", value: "on", scope: null });
+  assert.deepEqual(parsePolicyDashboardAction("unknown:_:"), { action: "status", scope: null });
+});
+
+test("runtime command reset and unknown actions are stable", () => {
+  const commandConfig = normalizePolicyCommandConfig({});
+  const set = applyRuntimeCommand(commandConfig, {}, {}, ctx, parsePolicyCommand("response always"), "operator");
+  const reset = applyRuntimeCommand(commandConfig, set.state, {}, ctx, parsePolicyCommand("reset"), "operator");
+  const noop = applyRuntimeCommand(commandConfig, reset.state, {}, ctx, { action: "noop" }, "operator");
+
+  assert.equal(Object.keys(reset.state.scopes).length, 0);
+  assert.equal(reset.changed, true);
+  assert.equal(noop.changed, false);
+});
+
+test("policy state persistence normalizes invalid entries", async () => {
+  const filePath = path.join(await mkdtemp(path.join(os.tmpdir(), "policy-state-")), "state.json");
+  const state = normalizePolicyState({
+    scopes: {
+      good: { policy: { responseMode: "always", ingestMode: "candidates" }, extra: true },
+      bad: null,
+      alsoBad: "x"
+    }
+  });
+  await savePolicyState(filePath, state);
+  const loaded = await loadPolicyState(filePath);
+  const missing = await loadPolicyState(path.join(path.dirname(filePath), "missing.json"));
+
+  assert.deepEqual(Object.keys(loaded.scopes), ["good"]);
+  assert.equal(loaded.scopes.good.policy.ingestMode, "responseCandidates");
+  assert.deepEqual(missing, { version: 1, scopes: {} });
+});
+
+test("default policy state path falls back when runtime state resolver fails", () => {
+  const filePath = defaultPolicyStatePath({
+    runtime: {
+      state: {
+        resolveStateDir() {
+          throw new Error("no state dir");
+        }
+      }
+    },
+    config: {}
+  }, normalizePolicyCommandConfig({}));
+
+  assert.match(filePath, /runtime\/extra-message-policy\/policy-state\.json$/);
+});
+
+test("native requireMention command rejects invalid values before loading runtime", async () => {
+  assert.deepEqual(await applyNativeRequireMentionCommand({}, "maybe"), {
+    text: "Usage: /policy native on|off"
+  });
+});
+
+test("scope resolution covers runtime-shaped and Telegram contexts", () => {
+  const runtimeScope = scopeFromContext({}, {
+    AccountId: "runtime",
+    GroupSpace: "guild-runtime",
+    NativeChannelId: "native-channel",
+    ParentChannelId: "parent-channel",
+    OriginatingTo: "channel:native-channel",
+    SessionKey: "agent:main:discord:guild:guild-runtime:channel:native-channel"
+  });
+
+  assert.equal(runtimeScope.platform, "discord");
+  assert.equal(runtimeScope.accountId, "runtime");
+  assert.equal(runtimeScope.guildId, "guild-runtime");
+  assert.equal(runtimeScope.channelId, "parent-channel");
+  assert.equal(runtimeScope.parentChannelId, "parent-channel");
+  assert.equal(runtimeScope.conversationId, "native-channel");
+  assert.equal(runtimeScope.key, "discord:runtime:guild-runtime:native-channel");
+  assert.equal(scopeFromContext({ provider: "telegram", from: "-100" }, {}).platform, "telegram");
+});
+
+test("native requireMention target reports unsupported and unresolved contexts", () => {
+  const cfg = { channels: { discord: { accounts: {} } } };
+
+  assert.deepEqual(resolveNativeRequireMentionTarget({ provider: "telegram" }, cfg), {
+    error: "This permanent config operation currently supports Discord only."
+  });
+  assert.deepEqual(resolveNativeRequireMentionTarget({ provider: "discord" }, cfg), {
+    error: "Unable to resolve the current Discord channel or thread."
+  });
+  const status = resolveNativeRequireMentionStatus({ provider: "discord" }, cfg);
+  assert.equal(status.status, "unavailable");
+  assert.match(renderNativeRequireMentionStatus(status), /unavailable/);
+});
+
+test("native requireMention status covers guild, wildcard, unset, and rendering", () => {
+  const cfg = {
+    channels: {
+      discord: {
+        guilds: {
+          "guild-1": {
+            requireMention: true,
+            channels: {
+              "*": { requireMention: false }
+            }
+          },
+          "guild-2": {
+            channels: {
+              "*": { requireMention: true }
+            }
+          },
+          "guild-3": {
+            channels: {}
+          }
+        }
+      }
+    }
+  };
+
+  assert.equal(resolveNativeRequireMentionStatus({ guildId: "guild-1", channelId: "new" }, cfg).status, "on");
+  assert.equal(resolveNativeRequireMentionStatus({ guildId: "guild-2", channelId: "new" }, cfg).status, "on");
+  const unset = resolveNativeRequireMentionStatus({ guildId: "guild-3", channelId: "new" }, cfg);
+  assert.equal(unset.status, "unset");
+  assert.match(renderNativeRequireMentionStatus(unset), /requireMention: unset/);
+});
+
+test("native requireMention override errors on missing guild and channels", () => {
+  assert.throws(() => applyNativeRequireMentionOverride({
+    channels: { discord: { guilds: {} } }
+  }, {
+    scope: "top-level",
+    scopePath: "channels.discord",
+    guildId: "missing",
+    zoneId: "zone"
+  }, true), /not configured/);
+
+  assert.throws(() => applyNativeRequireMentionOverride({
+    channels: { discord: { guilds: { "guild-1": {} } } }
+  }, {
+    scope: "top-level",
+    scopePath: "channels.discord",
+    guildId: "guild-1",
+    zoneId: "zone"
+  }, true), /channels block/);
+});
+
+test("dashboard renders unknown modes and compact labels", () => {
+  const view = buildPolicyDashboardView({
+    effectivePolicy: { respond: true, ingestMode: "strange", runtimeResponseMode: "weird", runtimeIngestMode: "odd" },
+    runtimeOverride: { runtimeResponseMode: "weird", runtimeIngestMode: "odd", runtimeInherited: true },
+    scope: { accountId: "very-long-account-id-that-needs-compaction", guildId: "guild", channelId: "zone" },
+    nativeStatus: { status: "mystery", source: "custom-source", target: { zoneId: "zone" } },
+    accountOptions: [
+      { id: "very-long-account-id-that-needs-compaction", label: "Very Long Account Label That Needs Compaction" },
+      null,
+      { value: "other", name: "Other" },
+      ""
+    ]
+  });
+
+  assert.match(view.text, /Unknown/);
+  const buttons = view.componentSpec.blocks.flatMap((block) => block.buttons);
+  assert.ok(buttons.some((button) => button.label.endsWith("...")));
 });

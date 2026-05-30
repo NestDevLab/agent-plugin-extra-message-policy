@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -9,6 +9,10 @@ async function createHarness(pluginConfig = {}, runtimeConfig = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "extra-message-policy-"));
   const hooks = new Map();
   const logs = [];
+  const tools = [];
+  const commands = [];
+  const interactiveHandlers = [];
+  const builtComponentMessages = [];
   const api = {
     pluginConfig,
     config: runtimeConfig,
@@ -31,16 +35,37 @@ async function createHarness(pluginConfig = {}, runtimeConfig = {}) {
     on(name, handler) {
       hooks.set(name, handler);
     },
-    registerTool() {},
-    registerCommand() {},
-    registerInteractiveHandler() {}
+    registerTool(factory, options) {
+      tools.push({ factory, options });
+    },
+    registerCommand(command) {
+      commands.push(command);
+    },
+    registerInteractiveHandler(handler) {
+      interactiveHandlers.push(handler);
+    }
   };
 
-  registerExtraMessagePolicy(api);
+  const result = registerExtraMessagePolicy(api, {
+    discordSdk: {
+      buildDiscordComponentMessage(payload) {
+        builtComponentMessages.push(payload);
+        return { components: [{ type: "actions", payload }] };
+      },
+      registerBuiltDiscordComponentMessage(payload) {
+        builtComponentMessages.push({ registered: payload });
+      }
+    }
+  });
 
   return {
     root,
     logs,
+    tools,
+    commands,
+    interactiveHandlers,
+    builtComponentMessages,
+    result,
     async emit(name, event = {}, ctx = {}) {
       const handler = hooks.get(name);
       return handler ? await handler(event, ctx) : undefined;
@@ -615,4 +640,264 @@ test("golden flow: runtime ingest all matches Discord runtime-shaped context", a
   assert.equal(rows.length, 1);
   assert.equal(rows[0].policy.ingestMode, "all");
   assert.equal(rows[0].policy.respond, false);
+});
+
+test("runtime registration exits early when plugin is disabled", async () => {
+  const harness = await createHarness({ enabled: false });
+
+  assert.equal(harness.result, undefined);
+  assert.equal(harness.commands.length, 0);
+  assert.equal(harness.tools.length, 0);
+  assert.match(harness.logs.map((entry) => entry.message).join("\n"), /disabled/);
+});
+
+test("golden flow: JSONL sharding, HTTP sink, dedupe, and sink failures", async () => {
+  const tmp = await mkdtemp(path.join(os.tmpdir(), "extra-policy-sinks-"));
+  const httpRecords = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, request) => {
+    httpRecords.push({ url, request });
+    return { ok: true, status: 204 };
+  };
+
+  try {
+    const harness = await createHarness({
+      defaultPolicy: { respond: true, ingestMode: "all" },
+      jsonlSink: {
+        enabled: true,
+        path: path.join(tmp, "messages.jsonl"),
+        shardBy: "dayConversation"
+      },
+      httpSink: {
+        enabled: true,
+        url: "https://example.invalid/ingest",
+        accessToken: "test-token"
+      },
+      dedupeWindow: 1
+    });
+
+    const event = {
+      messageId: "msg-sink-1",
+      content: "sink coverage",
+      timestamp: Date.UTC(2026, 4, 30, 12)
+    };
+    const ctx = {
+      accountId: "default",
+      guildId: "guild-1",
+      channelId: "channel with spaces",
+      conversationId: "channel:channel with spaces",
+      sessionKey: "agent:main:discord:channel:channel-with-spaces",
+      senderId: "sender-1",
+      messageId: "msg-sink-1"
+    };
+
+    await harness.emit("message_received", event, ctx);
+    await harness.emit("message_received", event, ctx);
+    const shardPath = path.join(tmp, "2026", "05", "30", "channel_channel_with_spaces.jsonl");
+    const rows = await readJsonl(shardPath);
+
+    assert.equal(rows.length, 1);
+    assert.equal(httpRecords.length, 1);
+    assert.equal(httpRecords[0].url, "https://example.invalid/ingest");
+    assert.equal(httpRecords[0].request.headers.authorization, "Bearer test-token");
+
+    globalThis.fetch = async () => ({ ok: false, status: 500 });
+    await harness.emit("message_received", { ...event, messageId: "msg-sink-2" }, { ...ctx, messageId: "msg-sink-2" });
+    assert.match(harness.logs.map((entry) => entry.message).join("\n"), /ingest failed: Error: http_500/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("golden flow: startup raw recall and registered search tool handle success and failure", async () => {
+  const tmp = await mkdtemp(path.join(os.tmpdir(), "extra-policy-raw-"));
+  const dayDir = path.join(tmp, "2026", "05", "30");
+  await writeFile(path.join(tmp, "placeholder"), "", "utf8").catch(() => {});
+  await import("node:fs/promises").then(({ mkdir }) => mkdir(dayDir, { recursive: true }));
+  await writeFile(path.join(dayDir, "channel.jsonl"), `${JSON.stringify({
+    observedAt: "2026-05-30T10:00:00.000Z",
+    conversationId: "channel:raw",
+    content: "Runtime startup recall should find Falcon context",
+    metadata: { channelName: "#ops", senderName: "Tester" }
+  })}\n`, "utf8");
+
+  const harness = await createHarness({
+    rawRecall: {
+      rootPath: tmp,
+      maxDays: 1,
+      triggerPhrases: ["falcon"],
+      tool: { enabled: true }
+    }
+  });
+
+  const startup = await harness.emit("before_agent_start", { prompt: "falcon status" }, {
+    conversationId: "channel:raw"
+  });
+  assert.match(startup.appendSystemContext, /Passive message raw ingest/);
+  assert.match(startup.prependContext, /Falcon context/);
+
+  const tool = harness.tools[0].factory({});
+  const toolResult = await tool.execute("tool-call", { query: "Falcon context" });
+  assert.match(toolResult.content[0].text, /Falcon context/);
+
+  const failing = await createHarness({
+    rawRecall: {
+      rootPath: path.join(tmp, "missing", "archive"),
+      triggerPhrases: ["falcon"]
+    }
+  });
+  const noRecall = await failing.emit("before_agent_start", { prompt: "falcon status" }, {});
+  assert.match(noRecall.appendSystemContext, /Passive message raw ingest/);
+  assert.equal(noRecall.prependContext, "");
+});
+
+test("golden flow: command and interactive handlers cover dashboard actions", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "extra-policy-command-"));
+  const statePath = path.join(root, "policy-state.json");
+  const harness = await createHarness({
+    policyCommand: { statePath },
+    defaultPolicy: { respond: true, ingestMode: "responseCandidates" }
+  }, {
+    channels: {
+      discord: {
+        accounts: {
+          default: {
+            guilds: {
+              "guild-1": {
+                channels: {
+                  "channel-1": { requireMention: false }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  assert.equal(harness.commands.length, 1);
+  assert.equal(harness.interactiveHandlers.length, 1);
+
+  const commandCtx = {
+    args: "response always",
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "channel-1",
+    conversationId: "channel:channel-1",
+    senderId: "operator",
+    sessionKey: "agent:main:discord:channel:channel-1"
+  };
+  const result = await harness.commands[0].handler(commandCtx);
+  assert.match(result.text, /Message policy/);
+  assert.equal(result.channelData.discord.components.length, 1);
+  await stat(statePath);
+
+  const help = await harness.commands[0].handler({ ...commandCtx, args: "help" });
+  assert.match(help.text, /Usage:/);
+
+  const callback = result.channelData.discord.components[0].payload.spec.blocks
+    .flatMap((block) => block.buttons || [])
+    .find((button) => button.label === "Details").callbackData;
+  const edits = [];
+  const handled = await harness.interactiveHandlers[0].handler({
+    ...commandCtx,
+    interaction: { payload: callback },
+    respond: {
+      editMessage(payload) {
+        edits.push(payload);
+      }
+    }
+  });
+  assert.deepEqual(handled, { handled: true });
+  assert.match(edits[0].text, /Details/);
+
+  const dismissCallback = result.channelData.discord.components[0].payload.spec.blocks
+    .flatMap((block) => block.buttons || [])
+    .find((button) => button.label === "Dismiss").callbackData;
+  const dismiss = await harness.interactiveHandlers[0].handler({
+    ...commandCtx,
+    interaction: { payload: dismissCallback },
+    respond: {
+      clearComponents(payload) {
+        edits.push(payload);
+      }
+    }
+  });
+  assert.deepEqual(dismiss, { handled: true });
+  assert.match(edits.at(-1).text, /dismissed/);
+});
+
+test("approval prompt handling covers persisted strings, arrays, text fields, cancel mode, and non-prompts", async () => {
+  const replaceHarness = await createHarness({
+    approvalPromptHandling: {
+      mode: "replace",
+      replacementText: "NO_REPLY"
+    }
+  });
+
+  assert.deepEqual(await replaceHarness.emit("tool_result_persist", {
+    message: { content: [{ type: "text", text: "Use:\n/approve abc-123" }] }
+  }, { sessionKey: "session-1" }), {
+    message: { content: [{ type: "text", text: "NO_REPLY" }] }
+  });
+
+  assert.deepEqual(await replaceHarness.emit("tool_result_persist", {
+    message: { text: "approval-pending" }
+  }, { sessionKey: "session-1" }), {
+    message: { text: "NO_REPLY" }
+  });
+
+  assert.equal(await replaceHarness.emit("tool_result_persist", {
+    message: { content: "ordinary tool result" }
+  }, {}), undefined);
+
+  const cancelHarness = await createHarness({
+    approvalPromptHandling: { mode: "cancel" }
+  });
+  assert.deepEqual(await cancelHarness.emit("message_sending", {
+    text: "approval-pending"
+  }, {
+    sessionKey: "agent:main:discord:channel:approval"
+  }), { cancel: true });
+});
+
+test("response suppression memory prunes old keys after many dispatches", async () => {
+  const harness = await createHarness({
+    defaultPolicy: { respond: false, ingestMode: "none" }
+  });
+
+  for (let i = 0; i < 2005; i += 1) {
+    await harness.emit("before_dispatch", {
+      messageId: `msg-${i}`,
+      content: "suppressed"
+    }, {
+      channelId: "bulk",
+      conversationId: "channel:bulk",
+      sessionKey: `agent:main:discord:channel:bulk:${i}`,
+      messageId: `msg-${i}`
+    });
+  }
+
+  assert.equal(await harness.emit("message_sending", { content: "old" }, {
+    messageId: "msg-0"
+  }), undefined);
+  assert.deepEqual(await harness.emit("message_sending", { content: "new" }, {
+    messageId: "msg-2004"
+  }), { cancel: true });
+});
+
+test("policy command handler falls back to help for unknown action", async () => {
+  const harness = await createHarness({
+    policyCommand: { statePath: path.join(await mkdtemp(path.join(os.tmpdir(), "extra-policy-help-")), "policy-state.json") }
+  });
+
+  const result = await harness.commands[0].handler({
+    args: "nonsense",
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "channel-1",
+    conversationId: "channel:channel-1"
+  });
+
+  assert.match(result.text, /Usage: \/policy status/);
 });

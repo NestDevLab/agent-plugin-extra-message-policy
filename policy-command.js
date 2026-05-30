@@ -544,6 +544,7 @@ export function parsePolicyCommand(rawArgs = "") {
 
 export function parsePolicyDashboardAction(rawPayload = "") {
   const parts = String(rawPayload || "").trim().split(":");
+  if (parts[0] === DASHBOARD_NAMESPACE) parts.shift();
   const section = (parts[0] || "status").toLowerCase();
   const value = parts[1] === "_" ? "" : (parts[1] || "");
   const normalizedValue = value.toLowerCase();

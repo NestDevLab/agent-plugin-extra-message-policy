@@ -12,6 +12,7 @@
   "scripts": {
     "build": "node --check index.js && node --check plugin-runtime.js && node --check policy.js && node --check policy-command.js && node --check native-reply.js && node --check raw-recall.js && node --check runtime-context.js",
     "test": "node --test",
+    "test:coverage": "node --test --experimental-test-coverage",
     "lint": "npm run build"
   },
   "peerDependencies": {

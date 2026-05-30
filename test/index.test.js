@@ -5,6 +5,8 @@ import {
   deriveNativeReplyMentionFact,
   deriveMentionFact,
   forceMentionedDispatchContext,
+  pruneMentionFacts,
+  recalledMentionFact,
   rememberMentionFact,
   withDerivedMentionFact,
   withRecalledMentionFact
@@ -166,4 +168,123 @@ test("native Discord replies without target author do not satisfy mention policy
 
   assert.equal(deriveNativeReplyMentionFact(event, {}, cfg), undefined);
   assert.equal(deriveMentionFact(event, {}, cfg), undefined);
+});
+
+test("mention fact memory ignores missing booleans, prunes stale entries, and preserves explicit facts", () => {
+  const state = {
+    mentionFacts: new Map([
+      ["stale", { mentioned: true, ts: 0 }],
+      ["empty", null]
+    ])
+  };
+
+  rememberMentionFact(state, { content: "no boolean" }, {});
+  assert.equal(state.mentionFacts.size, 2);
+  pruneMentionFacts(state, 200000, 120000);
+  assert.equal(state.mentionFacts.size, 0);
+  assert.equal(recalledMentionFact(state, {}, {}), undefined);
+
+  const explicit = withRecalledMentionFact(state, { wasMentioned: false }, {});
+  assert.equal(explicit.event.wasMentioned, false);
+});
+
+test("derived mention facts cover configured patterns, invalid patterns, arrays, and global agent config", () => {
+  const cfg = {
+    agents: {
+      main: {
+        identity: { name: "Main Agent" },
+        groupChat: { mentionPatterns: ["agent-main"] }
+      }
+    },
+    channels: {
+      discord: {
+        botId: "222222222222222222",
+        accounts: {
+          default: {
+            botUserName: "Default Bot"
+          }
+        }
+      }
+    },
+    messages: {
+      groupChat: {
+        mentionPatterns: ["global-agent"]
+      }
+    }
+  };
+
+  assert.equal(deriveMentionFact({
+    content: "agent-main please",
+    accountId: "default",
+    sessionKey: "agent:main:discord:channel:room"
+  }, {}, cfg), true);
+
+  assert.equal(deriveMentionFact({
+    content: "hello default bot",
+    accountId: "default",
+    sessionKey: "agent:other:discord:channel:room"
+  }, {}, cfg), true);
+
+  assert.equal(deriveMentionFact({
+    content: "global-agent please",
+    accountId: "default",
+    sessionKey: "agent:other:discord:channel:room"
+  }, {}, cfg), true);
+
+  assert.equal(deriveMentionFact({
+    content: "ordinary text",
+    accountId: "default",
+    sessionKey: "agent:other:discord:channel:room"
+  }, {}, cfg, {
+    mentionDetection: {
+      names: ["   "],
+      patterns: ["["]
+    }
+  }), undefined);
+});
+
+test("native reply mention facts cover Discord metadata shapes", () => {
+  const cfg = {
+    channels: {
+      discord: {
+        applicationId: "333333333333333333"
+      }
+    }
+  };
+
+  assert.equal(deriveNativeReplyMentionFact({
+    metadata: {
+      discord: {
+        referencedMessage: {
+          author: { id: "333333333333333333" }
+        }
+      }
+    }
+  }, {
+    sessionKey: "agent:main:discord:channel:room"
+  }, cfg), true);
+  assert.equal(deriveNativeReplyMentionFact({
+    metadata: {
+      discord: {
+        referencedMessage: {
+          author: { id: "444444444444444444" }
+        }
+      }
+    }
+  }, {
+    sessionKey: "agent:main:discord:channel:room"
+  }, cfg), undefined);
+});
+
+test("native reply handling covers disabled, custom platform list, number ids, and nested source ids", () => {
+  assert.equal(applyNativeReplyHandling({}, { messageId: "m1" }, normalizeNativeReplyHandling({ enabled: false })), null);
+  assert.deepEqual(applyNativeReplyHandling({}, { platform: "discord", messageId: "m1" }, normalizeNativeReplyHandling({ platforms: [] })), { replyTo: "m1" });
+  assert.equal(applyNativeReplyHandling({}, { platform: "discord", messageId: "m1" }, normalizeNativeReplyHandling({ platforms: ["telegram"] })), null);
+  assert.deepEqual(applyNativeReplyHandling({}, {
+    platform: "discord",
+    source: { id: 12345 }
+  }, normalizeNativeReplyHandling({ platforms: ["discord"] })), { replyTo: "12345" });
+  assert.deepEqual(applyNativeReplyHandling({}, {
+    metadata: { platform: "discord", sourceMessageId: "source-meta" }
+  }, normalizeNativeReplyHandling()), { replyTo: "source-meta" });
 });
