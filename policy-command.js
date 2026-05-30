@@ -452,6 +452,7 @@ export function applyRuntimePolicy(basePolicy, runtimeOverride, event = {}, ctx 
 }
 
 export function applyNativeMentionGatePolicy(policy = {}, nativeStatus = {}, event = {}, ctx = {}) {
+  if (policy.runtimeResponseMode) return policy;
   if (nativeStatus?.status !== "on" || policy.requireMention === true) return policy;
   const merged = {
     ...policy,
@@ -978,12 +979,6 @@ function renderTechnicalDetails({ effectivePolicy, runtimeOverride, nativeStatus
 }
 
 export function validateRuntimeResponseAction(command = {}, nativeStatus = {}) {
-  if (command.action === "set-response" && command.value === "always" && nativeStatus?.status === "on") {
-    return {
-      ok: false,
-      message: "Cannot enable Reply always while Native mention gate is On. Turn Native mention gate Off first, then set Reply always."
-    };
-  }
   return { ok: true };
 }
 
@@ -1009,7 +1004,7 @@ export function buildPolicyDashboardView({ effectivePolicy, runtimeOverride, sco
   const responseButtons = [
     makeButton({ label: "Replies off", action: "response", value: "off", style: selectedStyle(responseMode === "off") }),
     makeButton({ label: "Mention only", action: "response", value: "mention", style: selectedStyle(responseMode === "mention") }),
-    makeButton({ label: nativeMode === "on" ? "Reply always blocked" : "Reply always", action: "response", value: "always", style: selectedStyle(responseMode === "always") })
+    makeButton({ label: "Reply always", action: "response", value: "always", style: selectedStyle(responseMode === "always") })
   ];
   const ingestButtons = [
     makeButton({ label: "Read off", action: "ingest", value: "off", style: selectedStyle(ingestMode === "off") }),
@@ -1027,10 +1022,13 @@ export function buildPolicyDashboardView({ effectivePolicy, runtimeOverride, sco
     makeButton({ label: details ? "Hide details" : "Details", action: "details", value: details ? "hide" : "show", style: "secondary" }),
     makeButton({ label: "Dismiss", action: "dismiss", style: "secondary" })
   ];
-  const verdict = nativeMode === "on" ? "Reply always blocked" : "Reply always available";
-  const cause = nativeMode === "on"
+  const runtimeWins = Boolean(effectivePolicy?.runtimeResponseMode);
+  const verdict = nativeMode === "on" && !runtimeWins ? "Reply always blocked" : "Reply always available";
+  const cause = nativeMode === "on" && !runtimeWins
     ? "Native mention gate is enabled"
-    : "Native mention gate is not blocking this chat";
+    : runtimeWins
+      ? "Runtime policy overrides native requireMention"
+      : "Native mention gate is not blocking this chat";
   const text = [
     "**Message policy**",
     notice ? `**Notice:** ${notice}` : null,
@@ -1042,8 +1040,8 @@ export function buildPolicyDashboardView({ effectivePolicy, runtimeOverride, sco
     "**Effective status**",
     renderPolicyPair("Bot replies", renderReplyMode(responseMode)),
     renderPolicyPair("Bot reads", renderReadMode(ingestMode)),
-    renderPolicyPair("Reply always", nativeMode === "on" ? "Unavailable" : "Available"),
-    nativeMode === "on"
+    renderPolicyPair("Reply always", nativeMode === "on" && !runtimeWins ? "Unavailable" : "Available"),
+    nativeMode === "on" && !runtimeWins
       ? "Note: the native gate only makes mentioned messages eligible for replies."
       : "Note: the extra policy controls whether messages become reply candidates.",
     "",

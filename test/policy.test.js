@@ -93,6 +93,43 @@ test("channel policy wins over guild policy regardless of order", () => {
   });
 });
 
+test("thread inherits parent channel policy unless thread has its own policy", () => {
+  const cfg = normalizeConfig({
+    defaultPolicy: { respond: false, ingestMode: "all" },
+    policies: [
+      { channelId: "parent-channel", respond: true, ingestMode: "responseCandidates" }
+    ]
+  });
+
+  assert.deepEqual(resolvePolicy(cfg, {}, {
+    channelId: "thread-channel",
+    parentChannelId: "parent-channel",
+    conversationId: "channel:thread-channel"
+  }), {
+    respond: true,
+    ingestMode: "responseCandidates",
+    matched: "channelId:parent-channel"
+  });
+
+  const overridden = normalizeConfig({
+    defaultPolicy: { respond: false, ingestMode: "all" },
+    policies: [
+      { channelId: "parent-channel", respond: true, ingestMode: "responseCandidates" },
+      { channelId: "thread-channel", respond: false, ingestMode: "all" }
+    ]
+  });
+
+  assert.deepEqual(resolvePolicy(overridden, {}, {
+    channelId: "thread-channel",
+    parentChannelId: "parent-channel",
+    conversationId: "channel:thread-channel"
+  }), {
+    respond: false,
+    ingestMode: "all",
+    matched: "channelId:thread-channel"
+  });
+});
+
 test("conversation policy wins over channel policy regardless of order", () => {
   const cfg = normalizeConfig({
     policies: [

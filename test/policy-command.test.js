@@ -136,13 +136,13 @@ test("effective response policy matrix respects config, runtime, native gate, an
             const responseOff = runtimeMode === "off";
             const mentionRequired = !responseOff && (
               runtimeMode === "mention"
+              || (!runtimeMode && (baseRequireMention || nativeMode === "on"))
               || (runtimeMode !== "always" && baseRequireMention)
-              || nativeMode === "on"
             );
             const expectedRespond = responseOff ? false : mentionRequired ? mentioned : true;
 
             assert.equal(effective.respond, expectedRespond);
-            assert.equal(Boolean(effective.requireMention), mentionRequired || (responseOff && nativeMode === "on"));
+            assert.equal(Boolean(effective.requireMention), mentionRequired);
             assert.equal(effective.ingestMode, "all");
           });
         }
@@ -422,14 +422,14 @@ test("dashboard view exposes button callbacks for runtime and permanent policy",
   assert.match(view.text, /Bot replies.*Off/);
   assert.match(view.text, /Reply override.*Off/);
   assert.match(view.text, /Native mention gate.*On/);
-  assert.match(view.text, /Reply always blocked/);
-  assert.match(view.text, /Cause: Native mention gate is enabled/);
+  assert.match(view.text, /Reply always available/);
+  assert.match(view.text, /Cause: Runtime policy overrides native requireMention/);
   assert.equal(view.componentSpec.blocks.length, 4);
   const buttons = view.componentSpec.blocks.flatMap((block) => block.buttons);
   assert.ok(buttons.some((entry) => entry.callbackData.startsWith("policy:response:off:")));
   assert.ok(buttons.some((entry) => entry.callbackData.startsWith("policy:ingest:passive:")));
   assert.ok(buttons.some((entry) => entry.callbackData.startsWith("policy:native:on:")));
-  assert.ok(buttons.some((entry) => entry.label === "Reply always blocked"));
+  assert.ok(buttons.some((entry) => entry.label === "Reply always"));
   assert.ok(buttons.some((entry) => entry.label === "Disable native gate"));
   assert.ok(buttons.every((entry) => entry.allowedUsers[0] === "operator"));
 });
@@ -558,7 +558,7 @@ test("dashboard can render effective config separately from missing runtime over
   assert.equal(buttons.find((entry) => entry.label === "All messages").style, "success");
 });
 
-test("always reply is rejected while native mention gate is on", () => {
+test("always reply is allowed because runtime policy overrides native mention gate", () => {
   const blocked = validateRuntimeResponseAction(
     parsePolicyCommand("response always"),
     { status: "on" }
@@ -568,8 +568,7 @@ test("always reply is rejected while native mention gate is on", () => {
     { status: "off" }
   );
 
-  assert.equal(blocked.ok, false);
-  assert.match(blocked.message, /Native mention gate is On/);
+  assert.equal(blocked.ok, true);
   assert.equal(allowed.ok, true);
 });
 

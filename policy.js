@@ -108,6 +108,59 @@ function stripConversationPrefix(value) {
   return String(value || "").replace(/^(channel|chat|user):/, "");
 }
 
+function channelIdValues(ctx = {}, event = {}) {
+  const exact = new Set();
+  const parent = new Set();
+  for (const value of [
+    ctx?.channelId,
+    ctx?.channel,
+    event?.channelId,
+    event?.channel,
+    event?.metadata?.channelId,
+    event?.metadata?.channel_id,
+    ctx?.metadata?.channelId,
+    ctx?.metadata?.channel_id
+  ]) {
+    const text = stripConversationPrefix(String(value || "").trim());
+    if (text) exact.add(text);
+  }
+  for (const value of [
+    ctx?.parentChannelId,
+    ctx?.parentConversationId,
+    ctx?.parentId,
+    ctx?.threadParentId,
+    event?.parentChannelId,
+    event?.parentConversationId,
+    event?.parentId,
+    event?.threadParentId,
+    event?.metadata?.parentChannelId,
+    event?.metadata?.parent_channel_id,
+    event?.metadata?.parentId,
+    event?.metadata?.parent_id,
+    event?.metadata?.threadParentId,
+    event?.metadata?.thread_parent_id,
+    ctx?.metadata?.parentChannelId,
+    ctx?.metadata?.parent_channel_id,
+    ctx?.metadata?.parentId,
+    ctx?.metadata?.parent_id,
+    ctx?.metadata?.threadParentId,
+    ctx?.metadata?.thread_parent_id
+  ]) {
+    const text = stripConversationPrefix(String(value || "").trim());
+    if (text) parent.add(text);
+  }
+  return { exact: [...exact], parent: [...parent] };
+}
+
+function channelMatchKind(rule, ctx = {}, event = {}) {
+  if (!rule.channelId) return "";
+  const expected = stripConversationPrefix(rule.channelId);
+  const values = channelIdValues(ctx, event);
+  if (values.exact.includes(expected)) return "exact";
+  if (values.parent.includes(expected)) return "parent";
+  return "";
+}
+
 function conversationValues(ctx = {}, event = {}) {
   const values = new Set();
   for (const value of [
@@ -132,7 +185,7 @@ function anyConversationMatches(ctx, event, predicate) {
 }
 
 export function ruleMatches(rule, event = {}, ctx = {}) {
-  if (rule.channelId && rule.channelId !== ctxValue(ctx, event, "channelId") && rule.channelId !== ctxValue(ctx, event, "channel")) return false;
+  if (rule.channelId && !channelMatchKind(rule, ctx, event)) return false;
   if (rule.guildId && rule.guildId !== ctxValue(ctx, event, "guildId") && rule.guildId !== ctxValue(ctx, event, "guild") && rule.guildId !== String(event?.metadata?.guildId ?? "")) return false;
   if (rule.accountId && rule.accountId !== ctxValue(ctx, event, "accountId")) return false;
   if (rule.conversationId && !anyConversationMatches(ctx, event, (value) => value === rule.conversationId || stripConversationPrefix(value) === stripConversationPrefix(rule.conversationId))) return false;
@@ -173,12 +226,12 @@ export function describeRule(rule) {
   return parts.join(",") || "anonymous-rule";
 }
 
-function ruleSpecificity(rule = {}) {
+function ruleSpecificity(rule = {}, event = {}, ctx = {}) {
   let score = 0;
   if (rule.conversationId) score += 64;
   if (rule.conversationIdRegex) score += 60;
   if (rule.conversationIdPrefix) score += 56;
-  if (rule.channelId) score += 32;
+  if (rule.channelId) score += channelMatchKind(rule, ctx, event) === "parent" ? 28 : 32;
   if (rule.guildId) score += 24;
   if (rule.accountId) score += 16;
   if (rule.senderId) score += 8;
@@ -238,7 +291,7 @@ export function resolvePolicy(cfg, event = {}, ctx = {}) {
 
   for (const rule of cfg.policies) {
     if (!ruleMatches(rule, event, ctx)) continue;
-    const score = ruleSpecificity(rule);
+    const score = ruleSpecificity(rule, event, ctx);
     if (score > bestScore) {
       bestRule = rule;
       bestScore = score;
