@@ -50,7 +50,13 @@ async function createHarness(pluginConfig = {}, runtimeConfig = {}) {
     discordSdk: {
       buildDiscordComponentMessage(payload) {
         builtComponentMessages.push(payload);
-        return { components: [{ type: "actions", payload }] };
+        return {
+          components: [{
+            type: 17,
+            isV2: true,
+            components: [{ type: 1, payload }]
+          }]
+        };
       },
       registerBuiltDiscordComponentMessage(payload) {
         builtComponentMessages.push({ registered: payload });
@@ -833,6 +839,7 @@ test("golden flow: command and interactive handlers cover dashboard actions", as
   const result = await harness.commands[0].handler(commandCtx);
   assert.match(result.text, /Message policy/);
   assert.equal(result.channelData.discord.components.length, 1);
+  assert.equal(result.channelData.discord.components[0].type, 1);
   await stat(statePath);
 
   const help = await harness.commands[0].handler({ ...commandCtx, args: "help" });

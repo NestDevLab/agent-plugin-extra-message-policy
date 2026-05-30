@@ -252,7 +252,22 @@ function buildDashboardComponents(view, ctx = {}, discordSdk = {}) {
   if (typeof discordSdk.registerBuiltDiscordComponentMessage === "function") {
     discordSdk.registerBuiltDiscordComponentMessage({ buildResult });
   }
-  return buildResult.components;
+  return flattenClassicActionRows(buildResult.components);
+}
+
+function flattenClassicActionRows(components = []) {
+  const rows = [];
+  for (const component of components || []) {
+    if (!component) continue;
+    if (component.type === 1) {
+      rows.push(component);
+      continue;
+    }
+    if (Array.isArray(component.components)) {
+      rows.push(...flattenClassicActionRows(component.components));
+    }
+  }
+  return rows;
 }
 
 function dashboardReply(view, ctx = {}, discordSdk = {}) {
