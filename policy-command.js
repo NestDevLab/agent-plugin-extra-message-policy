@@ -148,7 +148,7 @@ function platformFromContext(event = {}, ctx = {}) {
   if (explicit.includes("telegram")) return "telegram";
   if (explicit.includes("discord")) return "discord";
 
-  const sessionKey = textValue(ctx.sessionKey, ctx.message?.sessionKey, ctx.metadata?.sessionKey, event.sessionKey, event.metadata?.sessionKey).toLowerCase();
+  const sessionKey = textValue(ctx.sessionKey, ctx.SessionKey, ctx.message?.sessionKey, ctx.metadata?.sessionKey, event.sessionKey, event.SessionKey, event.metadata?.sessionKey).toLowerCase();
   if (sessionKey.includes("telegram:")) return "telegram";
   if (sessionKey.includes("discord:")) return "discord";
 
@@ -225,12 +225,14 @@ export function scopeFromContext(event = {}, ctx = {}) {
   const platform = platformFromContext(event, ctx);
   const sessionScope = discordSessionScope(
     ctx.sessionKey,
+    ctx.SessionKey,
     ctx.message?.sessionKey,
     ctx.metadata?.sessionKey,
     event.sessionKey,
+    event.SessionKey,
     event.metadata?.sessionKey
   );
-  const accountId = textValue(ctx.accountId, event.accountId, event.metadata?.accountId, "default");
+  const accountId = textValue(ctx.accountId, ctx.AccountId, event.accountId, event.AccountId, event.metadata?.accountId, "default");
   const guildId = platform === "discord" ? textValue(
     ctx.guildId,
     ctx.rawGuildId,
@@ -308,7 +310,11 @@ export function scopeFromContext(event = {}, ctx = {}) {
   );
   const rawConversationId = nonSlashValue(
     ctx.conversationId,
+    ctx.OriginatingTo,
+    ctx.To,
     event.conversationId,
+    event.OriginatingTo,
+    event.To,
     event.metadata?.to,
     ctx.chatId,
     ctx.chat_id,
@@ -338,6 +344,8 @@ export function scopeFromContext(event = {}, ctx = {}) {
   const channelId = stripConversationPrefix(textValue(
     directParentAwareChannelId,
     ctx.channelId,
+    ctx.ChannelId,
+    ctx.NativeChannelId,
     ctx.messageChannelId,
     ctx.message?.channelId,
     ctx.message?.channel_id,
@@ -346,6 +354,8 @@ export function scopeFromContext(event = {}, ctx = {}) {
     ctx.raw?.channelId,
     ctx.raw?.channel_id,
     event.channelId,
+    event.ChannelId,
+    event.NativeChannelId,
     event.channel_id,
     event.channel,
     event.raw?.channelId,

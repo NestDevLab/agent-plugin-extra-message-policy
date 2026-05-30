@@ -29,7 +29,7 @@ import {
 import { applyNativeReplyHandling, normalizeNativeReplyHandling } from "./native-reply.js";
 
 function eventMessageId(event = {}, ctx = {}) {
-  return String(event.messageId ?? ctx.messageId ?? "");
+  return String(event.messageId ?? event.MessageId ?? ctx.messageId ?? ctx.MessageId ?? "");
 }
 
 function rememberDedupe(state, key, windowSize) {
@@ -47,13 +47,13 @@ function toRecord(source, event = {}, ctx = {}, policy = {}) {
   return {
     source,
     observedAt: new Date().toISOString(),
-    channelId: ctx.channelId ?? event.channel ?? event.from,
-    accountId: ctx.accountId ?? event.accountId,
-    conversationId: ctx.conversationId ?? event.conversationId,
-    sessionKey: ctx.sessionKey ?? event.sessionKey,
-    runId: ctx.runId ?? event.runId,
-    messageId: event.messageId ?? ctx.messageId,
-    senderId: event.senderId ?? ctx.senderId,
+    channelId: ctx.channelId ?? ctx.ChannelId ?? ctx.NativeChannelId ?? event.channelId ?? event.ChannelId ?? event.NativeChannelId ?? event.channel ?? event.from,
+    accountId: ctx.accountId ?? ctx.AccountId ?? event.accountId ?? event.AccountId,
+    conversationId: ctx.conversationId ?? ctx.OriginatingTo ?? ctx.To ?? event.conversationId ?? event.OriginatingTo ?? event.To,
+    sessionKey: ctx.sessionKey ?? ctx.SessionKey ?? event.sessionKey ?? event.SessionKey,
+    runId: ctx.runId ?? ctx.RunId ?? event.runId ?? event.RunId,
+    messageId: event.messageId ?? event.MessageId ?? ctx.messageId ?? ctx.MessageId,
+    senderId: event.senderId ?? event.SenderId ?? ctx.senderId ?? ctx.SenderId,
     threadId: event.threadId,
     timestamp: event.timestamp,
     content: event.content ?? event.body ?? "",
@@ -109,7 +109,7 @@ async function ingest(api, cfg, state, source, event, ctx, policy) {
   if (!shouldIngest(policy, source)) return;
 
   const id = eventMessageId(event, ctx);
-  const dedupeKey = id ? `${ctx.channelId || event.channel || event.from || "unknown"}:${id}` : "";
+  const dedupeKey = id ? `${ctx.channelId || ctx.ChannelId || ctx.NativeChannelId || event.channelId || event.ChannelId || event.NativeChannelId || event.channel || event.from || "unknown"}:${id}` : "";
   if (rememberDedupe(state, dedupeKey, cfg.dedupeWindow)) return;
 
   const record = toRecord(source, event, ctx, policy);
@@ -121,9 +121,30 @@ async function ingest(api, cfg, state, source, event, ctx, policy) {
   }
 }
 
+function responsePolicyKeys(event = {}, ctx = {}) {
+  return [
+    ctx.runId,
+    ctx.RunId,
+    event.runId,
+    event.RunId,
+    ctx.sessionKey,
+    ctx.SessionKey,
+    event.sessionKey,
+    event.SessionKey,
+    ctx.messageId,
+    ctx.MessageId,
+    ctx.OriginatingMessageId,
+    ctx.SourceMessageId,
+    event.messageId,
+    event.MessageId,
+    event.OriginatingMessageId,
+    event.SourceMessageId
+  ].filter(Boolean).map(String);
+}
+
 function rememberResponsePolicy(state, event = {}, ctx = {}, policy = {}) {
-  for (const key of [ctx.runId, event.runId, ctx.sessionKey, event.sessionKey].filter(Boolean)) {
-    state.responsePolicy.set(String(key), {
+  for (const key of responsePolicyKeys(event, ctx)) {
+    state.responsePolicy.set(key, {
       respond: policy.respond,
       updatedAt: Date.now()
     });
@@ -181,8 +202,8 @@ function replaceMessageText(message = {}, text) {
 }
 
 function lookupResponseAllowed(state, ctx = {}) {
-  for (const key of [ctx.runId, ctx.sessionKey].filter(Boolean)) {
-    const remembered = state.responsePolicy.get(String(key));
+  for (const key of responsePolicyKeys({}, ctx)) {
+    const remembered = state.responsePolicy.get(key);
     if (remembered && remembered.respond === false) return false;
   }
   return true;

@@ -121,8 +121,12 @@ function channelIdValues(ctx = {}, event = {}) {
   const parent = new Set();
   for (const value of [
     ctx?.channelId,
+    ctx?.ChannelId,
+    ctx?.NativeChannelId,
     ctx?.channel,
     event?.channelId,
+    event?.ChannelId,
+    event?.NativeChannelId,
     event?.channel,
     event?.metadata?.channelId,
     event?.metadata?.channel_id,
@@ -135,12 +139,18 @@ function channelIdValues(ctx = {}, event = {}) {
   }
   for (const value of [
     ctx?.parentChannelId,
+    ctx?.ParentChannelId,
+    ctx?.NativeParentChannelId,
     ctx?.parentConversationId,
     ctx?.parentId,
+    ctx?.ParentId,
     ctx?.threadParentId,
     event?.parentChannelId,
+    event?.ParentChannelId,
+    event?.NativeParentChannelId,
     event?.parentConversationId,
     event?.parentId,
+    event?.ParentId,
     event?.threadParentId,
     event?.metadata?.parentChannelId,
     event?.metadata?.parent_channel_id,
@@ -174,7 +184,11 @@ function conversationValues(ctx = {}, event = {}) {
   const values = new Set();
   for (const value of [
     ctx?.conversationId,
+    ctx?.OriginatingTo,
+    ctx?.To,
     event?.conversationId,
+    event?.OriginatingTo,
+    event?.To,
     event?.metadata?.to,
     event?.metadata?.originatingTo,
     event?.metadata?.threadId,
@@ -196,8 +210,17 @@ function anyConversationMatches(ctx, event, predicate) {
 
 export function ruleMatches(rule, event = {}, ctx = {}) {
   if (rule.channelId && !channelMatchKind(rule, ctx, event)) return false;
-  if (rule.guildId && rule.guildId !== ctxValue(ctx, event, "guildId") && rule.guildId !== ctxValue(ctx, event, "guild") && rule.guildId !== String(event?.metadata?.guildId ?? "")) return false;
-  if (rule.accountId && rule.accountId !== ctxValue(ctx, event, "accountId")) return false;
+  if (rule.guildId && ![
+    ctxValue(ctx, event, "guildId"),
+    ctxValue(ctx, event, "guild"),
+    ctxValue(ctx, event, "GroupSpace"),
+    String(event?.metadata?.guildId ?? ""),
+    String(ctx?.metadata?.guildId ?? "")
+  ].includes(rule.guildId)) return false;
+  if (rule.accountId && ![
+    ctxValue(ctx, event, "accountId"),
+    ctxValue(ctx, event, "AccountId")
+  ].includes(rule.accountId)) return false;
   if (rule.conversationId && !anyConversationMatches(ctx, event, (value) => value === rule.conversationId || stripConversationPrefix(value) === stripConversationPrefix(rule.conversationId))) return false;
   if (rule.conversationIdPrefix && !anyConversationMatches(ctx, event, (value) => value.startsWith(rule.conversationIdPrefix))) return false;
   if (rule.conversationIdRegex) {
@@ -208,13 +231,16 @@ export function ruleMatches(rule, event = {}, ctx = {}) {
       return false;
     }
   }
-  if (rule.senderId && rule.senderId !== ctxValue(ctx, event, "senderId")) return false;
+  if (rule.senderId && ![
+    ctxValue(ctx, event, "senderId"),
+    ctxValue(ctx, event, "SenderId")
+  ].includes(rule.senderId)) return false;
   if (typeof rule.isGroup === "boolean") {
     const value = event?.isGroup;
     if (typeof value !== "boolean" || value !== rule.isGroup) return false;
   }
 
-  const sessionKey = ctxValue(ctx, event, "sessionKey");
+  const sessionKey = ctxValue(ctx, event, "sessionKey") || ctxValue(ctx, event, "SessionKey");
   if (rule.sessionKeyIncludes && !sessionKey.includes(rule.sessionKeyIncludes)) return false;
   if (rule.sessionKeyRegex) {
     try {

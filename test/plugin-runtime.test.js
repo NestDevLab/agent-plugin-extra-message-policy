@@ -486,3 +486,133 @@ test("golden flow: approval prompt replacement preserves native Discord reply ta
     content: "NO_REPLY"
   });
 });
+
+test("golden flow: Discord runtime-shaped context suppresses unmentioned replies", async () => {
+  const harness = await createHarness({
+    defaultPolicy: { respond: true, ingestMode: "all" },
+    policies: [
+      { channelId: "runtime-channel", respond: true, ingestMode: "all", requireMention: true }
+    ]
+  });
+
+  const event = {
+    MessageId: "msg-runtime-suppress",
+    content: "not addressed to the bot",
+    WasMentioned: false,
+    timestamp: Date.now()
+  };
+  const ctx = {
+    AccountId: "default",
+    GroupSpace: "guild-1",
+    ChannelId: "runtime-channel",
+    NativeChannelId: "runtime-channel",
+    OriginatingTo: "channel:runtime-channel",
+    SessionKey: "agent:main:discord:channel:runtime-channel",
+    SenderId: "user-1",
+    MessageId: "msg-runtime-suppress",
+    WasMentioned: false
+  };
+
+  const dispatch = await harness.emit("before_dispatch", event, ctx);
+  const outbound = await harness.emit("message_sending", { content: "should not send" }, {
+    MessageId: "msg-runtime-suppress"
+  });
+
+  assert.deepEqual(dispatch, { handled: true });
+  assert.deepEqual(outbound, { cancel: true });
+});
+
+test("golden flow: runtime always override matches Discord runtime-shaped context", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "extra-message-policy-runtime-shaped-"));
+  const statePath = path.join(root, "policy-state.json");
+  await writeFile(statePath, JSON.stringify({
+    scopes: {
+      "discord:default:guild-1:runtime-always": {
+        policy: {
+          responseMode: "always",
+          ingestMode: "all"
+        }
+      }
+    }
+  }), "utf8");
+
+  const harness = await createHarness({
+    defaultPolicy: { respond: false, ingestMode: "none" },
+    policyCommand: { statePath },
+    policies: [
+      { channelId: "runtime-always", respond: false, ingestMode: "none" }
+    ]
+  });
+
+  const event = {
+    MessageId: "msg-runtime-always",
+    content: "dynamic policy should allow this",
+    timestamp: Date.now()
+  };
+  const ctx = {
+    AccountId: "default",
+    GroupSpace: "guild-1",
+    ChannelId: "runtime-always",
+    NativeChannelId: "runtime-always",
+    OriginatingTo: "channel:runtime-always",
+    SessionKey: "agent:main:discord:channel:runtime-always",
+    SenderId: "user-1",
+    MessageId: "msg-runtime-always",
+    WasMentioned: false
+  };
+
+  const dispatch = await harness.emit("before_dispatch", event, ctx);
+  const outbound = await harness.emit("message_sending", { content: "reply" }, {
+    MessageId: "msg-runtime-always"
+  });
+
+  assert.equal(dispatch, undefined);
+  assert.equal(outbound, undefined);
+});
+
+test("golden flow: runtime ingest all matches Discord runtime-shaped context", async () => {
+  const jsonlPath = path.join(os.tmpdir(), `extra-policy-${Date.now()}-runtime-ingest.jsonl`);
+  const root = await mkdtemp(path.join(os.tmpdir(), "extra-message-policy-runtime-ingest-"));
+  const statePath = path.join(root, "policy-state.json");
+  await writeFile(statePath, JSON.stringify({
+    scopes: {
+      "discord:default:guild-1:runtime-ingest": {
+        policy: {
+          responseMode: "off",
+          ingestMode: "all"
+        }
+      }
+    }
+  }), "utf8");
+
+  const harness = await createHarness({
+    defaultPolicy: { respond: false, ingestMode: "none" },
+    policyCommand: { statePath },
+    jsonlSink: { enabled: true, path: jsonlPath }
+  });
+
+  const event = {
+    MessageId: "msg-runtime-ingest",
+    content: "this should be ingested",
+    timestamp: Date.now()
+  };
+  const ctx = {
+    AccountId: "default",
+    GroupSpace: "guild-1",
+    ChannelId: "runtime-ingest",
+    NativeChannelId: "runtime-ingest",
+    OriginatingTo: "channel:runtime-ingest",
+    SessionKey: "agent:main:discord:channel:runtime-ingest",
+    SenderId: "user-1",
+    MessageId: "msg-runtime-ingest"
+  };
+
+  await harness.emit("message_received", event, ctx);
+  const dispatch = await harness.emit("before_dispatch", event, ctx);
+
+  assert.deepEqual(dispatch, { handled: true });
+  const rows = await readJsonl(jsonlPath);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].policy.ingestMode, "all");
+  assert.equal(rows[0].policy.respond, false);
+});
