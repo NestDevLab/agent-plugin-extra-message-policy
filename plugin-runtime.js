@@ -33,6 +33,189 @@ function eventMessageId(event = {}, ctx = {}) {
   return String(event.messageId ?? event.MessageId ?? ctx.messageId ?? ctx.MessageId ?? "");
 }
 
+function textValue(...values) {
+  for (const value of values) {
+    const text = String(value ?? "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function stripConversationPrefix(value) {
+  return String(value || "").trim().replace(/^(channel|chat|user):/, "");
+}
+
+function routeChannelId(event = {}, ctx = {}) {
+  return stripConversationPrefix(textValue(
+    ctx.NativeChannelId,
+    ctx.ChannelId,
+    ctx.channelId,
+    ctx.conversationId,
+    ctx.OriginatingTo,
+    ctx.To,
+    event.NativeChannelId,
+    event.ChannelId,
+    event.channelId,
+    event.conversationId,
+    event.OriginatingTo,
+    event.To,
+    event.metadata?.channelId,
+    event.metadata?.channel_id,
+    event.metadata?.to,
+    ctx.metadata?.channelId,
+    ctx.metadata?.channel_id,
+    ctx.metadata?.to
+  ));
+}
+
+function routeParentChannelId(event = {}, ctx = {}) {
+  return stripConversationPrefix(textValue(
+    ctx.NativeParentChannelId,
+    ctx.ParentChannelId,
+    ctx.parentChannelId,
+    ctx.ParentId,
+    ctx.parentId,
+    event.NativeParentChannelId,
+    event.ParentChannelId,
+    event.parentChannelId,
+    event.ParentId,
+    event.parentId,
+    event.metadata?.parentChannelId,
+    event.metadata?.parent_channel_id,
+    event.metadata?.parentId,
+    event.metadata?.parent_id,
+    ctx.metadata?.parentChannelId,
+    ctx.metadata?.parent_channel_id,
+    ctx.metadata?.parentId,
+    ctx.metadata?.parent_id
+  ));
+}
+
+function routeGuildId(event = {}, ctx = {}) {
+  return textValue(
+    ctx.GroupSpace,
+    ctx.guildId,
+    ctx.rawGuildId,
+    event.GroupSpace,
+    event.guildId,
+    event.rawGuildId,
+    event.metadata?.guildId,
+    event.metadata?.guild_id,
+    event.metadata?.rawGuildId,
+    event.metadata?.raw_guild_id,
+    ctx.metadata?.guildId,
+    ctx.metadata?.guild_id,
+    ctx.metadata?.rawGuildId,
+    ctx.metadata?.raw_guild_id
+  );
+}
+
+function routeAccountId(event = {}, ctx = {}) {
+  return textValue(
+    ctx.AccountId,
+    ctx.accountId,
+    event.AccountId,
+    event.accountId,
+    event.metadata?.accountId,
+    event.metadata?.account_id,
+    ctx.metadata?.accountId,
+    ctx.metadata?.account_id
+  );
+}
+
+function routeSessionKey(event = {}, ctx = {}) {
+  return textValue(
+    ctx.SessionKey,
+    ctx.sessionKey,
+    event.SessionKey,
+    event.sessionKey,
+    event.metadata?.sessionKey,
+    event.metadata?.session_key,
+    ctx.metadata?.sessionKey,
+    ctx.metadata?.session_key
+  );
+}
+
+function rememberDiscordRoute(state, event = {}, ctx = {}) {
+  const guildId = routeGuildId(event, ctx);
+  const channelId = routeChannelId(event, ctx);
+  if (!guildId || !channelId) return;
+  const route = {
+    guildId,
+    rawGuildId: guildId,
+    channelId,
+    parentChannelId: routeParentChannelId(event, ctx),
+    accountId: routeAccountId(event, ctx),
+    updatedAt: Date.now()
+  };
+  for (const key of [
+    `channel:${channelId}`,
+    routeSessionKey(event, ctx) ? `session:${routeSessionKey(event, ctx)}` : ""
+  ].filter(Boolean)) {
+    state.discordRoutes.set(key, route);
+  }
+  while (state.discordRoutes.size > 5000) {
+    const oldest = state.discordRoutes.keys().next().value;
+    state.discordRoutes.delete(oldest);
+  }
+}
+
+function lookupDiscordRoute(state, event = {}, ctx = {}) {
+  for (const key of [
+    routeSessionKey(event, ctx) ? `session:${routeSessionKey(event, ctx)}` : "",
+    routeChannelId(event, ctx) ? `channel:${routeChannelId(event, ctx)}` : ""
+  ].filter(Boolean)) {
+    const route = state.discordRoutes.get(key);
+    if (route) return route;
+  }
+  return null;
+}
+
+function withRememberedDiscordRoute(state, event = {}, ctx = {}) {
+  const route = lookupDiscordRoute(state, event, ctx);
+  if (!route) return { event, ctx };
+  const guildId = routeGuildId(event, ctx) || route.guildId;
+  const parentChannelId = routeParentChannelId(event, ctx) || route.parentChannelId;
+  const accountId = routeAccountId(event, ctx) || route.accountId;
+  const channelId = routeChannelId(event, ctx) || route.channelId;
+  const metadata = {
+    ...(ctx.metadata || {}),
+    guildId,
+    rawGuildId: guildId,
+    channelId,
+    parentChannelId,
+    accountId
+  };
+  return {
+    event: {
+      ...event,
+      guildId: event.guildId || guildId,
+      rawGuildId: event.rawGuildId || guildId,
+      channelId: event.channelId || channelId,
+      parentChannelId: event.parentChannelId || parentChannelId,
+      accountId: event.accountId || accountId,
+      metadata: {
+        ...(event.metadata || {}),
+        guildId,
+        rawGuildId: guildId,
+        channelId,
+        parentChannelId,
+        accountId
+      }
+    },
+    ctx: {
+      ...ctx,
+      guildId: ctx.guildId || guildId,
+      rawGuildId: ctx.rawGuildId || guildId,
+      GroupSpace: ctx.GroupSpace || guildId,
+      channelId: ctx.channelId || channelId,
+      parentChannelId: ctx.parentChannelId || parentChannelId,
+      accountId: ctx.accountId || accountId,
+      metadata
+    }
+  };
+}
+
 function rememberDedupe(state, key, windowSize) {
   if (!key) return false;
   if (state.seen.has(key)) return true;
@@ -202,12 +385,31 @@ function replaceMessageText(message = {}, text) {
   return { ...message, content: text };
 }
 
-function lookupResponseAllowed(state, ctx = {}) {
+function lookupRememberedResponse(state, ctx = {}) {
   for (const key of responsePolicyKeys({}, ctx)) {
     const remembered = state.responsePolicy.get(key);
     if (remembered && remembered.respond === false) return false;
+    if (remembered && remembered.respond === true) return true;
   }
-  return true;
+  return undefined;
+}
+
+function hasPolicyRoutingContext(ctx = {}) {
+  return Boolean(
+    ctx.channelId
+    || ctx.ChannelId
+    || ctx.NativeChannelId
+    || ctx.conversationId
+    || ctx.OriginatingTo
+    || ctx.To
+    || ctx.sessionKey
+    || ctx.SessionKey
+    || ctx.guildId
+    || ctx.rawGuildId
+    || ctx.GroupSpace
+    || ctx.accountId
+    || ctx.AccountId
+  );
 }
 
 function commandNameFrom(event = {}, ctx = {}) {
@@ -349,14 +551,16 @@ export function registerExtraMessagePolicy(api, options = {}) {
   const state = {
     seen: new Map(),
     responsePolicy: new Map(),
-    mentionFacts: new Map()
+    mentionFacts: new Map(),
+    discordRoutes: new Map()
   };
 
   const resolveEffectivePolicy = async (event = {}, ctx = {}) => {
+    const routed = withRememberedDiscordRoute(state, event, ctx);
     const enriched = withDerivedMentionFact(
       state,
-      event,
-      ctx,
+      routed.event,
+      routed.ctx,
       api.runtime?.config?.current?.() || api.config || {},
       api.pluginConfig || {}
     );
@@ -506,17 +710,20 @@ export function registerExtraMessagePolicy(api, options = {}) {
 
   api.on("inbound_claim", async (event, ctx) => {
     if (isPolicyCommand(commandConfig, event, ctx)) return;
+    rememberDiscordRoute(state, event, ctx);
     rememberMentionFact(state, event, ctx);
   });
 
   api.on("message_received", async (event, ctx) => {
     if (isPolicyCommand(commandConfig, event, ctx)) return;
+    rememberDiscordRoute(state, event, ctx);
     const policy = await resolveEffectivePolicy(event, ctx);
     await ingest(api, cfg, state, "message_received", event, ctx, policy);
   });
 
   api.on("before_dispatch", async (event, ctx) => {
     if (isPolicyCommand(commandConfig, event, ctx)) return;
+    rememberDiscordRoute(state, event, ctx);
     const policy = await resolveEffectivePolicy(event, ctx);
     rememberResponsePolicy(state, event, ctx, policy);
     await ingest(api, cfg, state, "before_dispatch", event, ctx, policy);
@@ -544,7 +751,12 @@ export function registerExtraMessagePolicy(api, options = {}) {
         ? { ...(nativeReplyPatch || {}), content: approvalPromptHandling.replacementText }
         : { cancel: true };
     }
-    if (lookupResponseAllowed(state, ctx) === false) return { cancel: true };
+    const rememberedResponse = lookupRememberedResponse(state, ctx);
+    if (rememberedResponse === false) return { cancel: true };
+    if (rememberedResponse !== true && hasPolicyRoutingContext(ctx)) {
+      const policy = await resolveEffectivePolicy(event, ctx);
+      if (policy?.respond === false) return { cancel: true };
+    }
     if (nativeReplyPatch) return nativeReplyPatch;
   });
 }

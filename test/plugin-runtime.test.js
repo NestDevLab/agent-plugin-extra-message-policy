@@ -167,6 +167,90 @@ test("golden flow: Telegram policy matches chat aliases and suppresses reply end
   assert.equal(rows[0].policy.matched, "channelId:-100123");
 });
 
+test("Discord guild-wide ingest policy cancels outbound replies without remembered message id", async () => {
+  const harness = await createHarness({
+    defaultPolicy: { respond: true, ingestMode: "all" },
+    policies: [
+      { accountId: "chromiecraft-bot", guildId: "788063059926712341", respond: false, ingestMode: "all" },
+      { accountId: "chromiecraft-bot", channelId: "1507016260620255392", respond: true, ingestMode: "all" }
+    ]
+  });
+
+  const suppressed = await harness.emit("message_sending", { content: "reply" }, {
+    accountId: "chromiecraft-bot",
+    guildId: "788063059926712341",
+    channelId: "999999999999999999",
+    conversationId: "channel:999999999999999999",
+    sessionKey: "agent:chromiecraft-bot:discord:channel:999999999999999999",
+    senderId: "user-1"
+  });
+
+  const allowed = await harness.emit("message_sending", { content: "reply" }, {
+    accountId: "chromiecraft-bot",
+    guildId: "788063059926712341",
+    channelId: "1507016260620255392",
+    conversationId: "channel:1507016260620255392",
+    sessionKey: "agent:chromiecraft-bot:discord:channel:1507016260620255392",
+    senderId: "user-1"
+  });
+
+  assert.deepEqual(suppressed, { cancel: true });
+  assert.equal(allowed, undefined);
+});
+
+test("Discord dispatch reuses remembered guild route when dispatch context omits guild id", async () => {
+  const harness = await createHarness({
+    defaultPolicy: { respond: true, ingestMode: "all" },
+    policies: [
+      { accountId: "chromiecraft-bot", guildId: "788063059926712341", respond: false, ingestMode: "all" },
+      { accountId: "chromiecraft-bot", channelId: "1507016260620255392", respond: true, ingestMode: "all" }
+    ]
+  });
+
+  const receivedEvent = {
+    messageId: "paladin-1",
+    content: "chromie.. i can see you typing...",
+    metadata: {
+      guildId: "788063059926712341",
+      channelId: "825732321168457769"
+    }
+  };
+  const receivedCtx = {
+    accountId: "chromiecraft-bot",
+    guildId: "788063059926712341",
+    channelId: "825732321168457769",
+    conversationId: "channel:825732321168457769",
+    sessionKey: "agent:chromiecraft-bot:discord:channel:825732321168457769",
+    senderId: "user-1",
+    messageId: "paladin-1"
+  };
+  const dispatchCtxWithoutGuild = {
+    accountId: "chromiecraft-bot",
+    channelId: "825732321168457769",
+    conversationId: "channel:825732321168457769",
+    sessionKey: "agent:chromiecraft-bot:discord:channel:825732321168457769",
+    senderId: "user-1",
+    messageId: "paladin-1"
+  };
+
+  await harness.emit("inbound_claim", receivedEvent, receivedCtx);
+  await harness.emit("message_received", receivedEvent, receivedCtx);
+  const dispatch = await harness.emit("before_dispatch", {
+    messageId: "paladin-1",
+    content: "chromie.. i can see you typing..."
+  }, dispatchCtxWithoutGuild);
+  const outbound = await harness.emit("message_sending", { content: "reply" }, {
+    accountId: "chromiecraft-bot",
+    channelId: "825732321168457769",
+    conversationId: "channel:825732321168457769",
+    sessionKey: "agent:chromiecraft-bot:discord:channel:825732321168457769",
+    senderId: "user-1"
+  });
+
+  assert.deepEqual(dispatch, { handled: true });
+  assert.deepEqual(outbound, { cancel: true });
+});
+
 test("golden flow: runtime always override forces reply context over suppressed base policy", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "extra-message-policy-runtime-"));
   const statePath = path.join(root, "policy-state.json");

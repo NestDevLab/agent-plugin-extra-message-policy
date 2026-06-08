@@ -516,6 +516,15 @@ export function applyRuntimePolicy(basePolicy, runtimeOverride, event = {}, ctx 
 }
 
 export function applyNativeMentionGatePolicy(policy = {}, nativeStatus = {}, event = {}, ctx = {}) {
+  if (nativeStatus?.enabled === false) {
+    return {
+      ...policy,
+      respond: false,
+      nativeEnabledGate: true,
+      nativeEnabledGateSource: nativeStatus.source || "",
+      matched: `${policy.matched || "base"}+native-disabled`
+    };
+  }
   if (policy.runtimeResponseMode) return policy;
   if (policy.matched && policy.matched !== "default") return policy;
   if (nativeStatus?.status !== "on" || policy.requireMention === true) return policy;
@@ -827,9 +836,26 @@ export function resolveNativeRequireMentionStatus(ctx = {}, cfg = {}) {
   const channelEntry = guildEntry?.channels?.[target.zoneId];
   const parentChannelEntry = target.parentChannelId ? guildEntry?.channels?.[target.parentChannelId] : null;
   const wildcardEntry = guildEntry?.channels?.["*"];
+  if (channelEntry && channelEntry.enabled === false) {
+    return {
+      target,
+      enabled: false,
+      status: channelEntry.requireMention ? "on" : "off",
+      source: `${target.scopePath}.guilds.${target.guildId}.channels.${target.zoneId}.enabled`
+    };
+  }
+  if (parentChannelEntry && parentChannelEntry.enabled === false) {
+    return {
+      target,
+      enabled: false,
+      status: parentChannelEntry.requireMention ? "on" : "off",
+      source: `${target.scopePath}.guilds.${target.guildId}.channels.${target.parentChannelId}.enabled`
+    };
+  }
   if (channelEntry && Object.prototype.hasOwnProperty.call(channelEntry, "requireMention")) {
     return {
       target,
+      enabled: channelEntry.enabled !== false,
       status: channelEntry.requireMention ? "on" : "off",
       source: `${target.scopePath}.guilds.${target.guildId}.channels.${target.zoneId}.requireMention`
     };
@@ -837,8 +863,17 @@ export function resolveNativeRequireMentionStatus(ctx = {}, cfg = {}) {
   if (parentChannelEntry && Object.prototype.hasOwnProperty.call(parentChannelEntry, "requireMention")) {
     return {
       target,
+      enabled: parentChannelEntry.enabled !== false,
       status: parentChannelEntry.requireMention ? "on" : "off",
       source: `${target.scopePath}.guilds.${target.guildId}.channels.${target.parentChannelId}.requireMention`
+    };
+  }
+  if (wildcardEntry && wildcardEntry.enabled === false) {
+    return {
+      target,
+      enabled: false,
+      status: wildcardEntry.requireMention ? "on" : "off",
+      source: `${target.scopePath}.guilds.${target.guildId}.channels.*.enabled`
     };
   }
   if (guildEntry && Object.prototype.hasOwnProperty.call(guildEntry, "requireMention")) {
@@ -851,6 +886,7 @@ export function resolveNativeRequireMentionStatus(ctx = {}, cfg = {}) {
   if (wildcardEntry && Object.prototype.hasOwnProperty.call(wildcardEntry, "requireMention")) {
     return {
       target,
+      enabled: wildcardEntry.enabled !== false,
       status: wildcardEntry.requireMention ? "on" : "off",
       source: `${target.scopePath}.guilds.${target.guildId}.channels.*.requireMention`
     };

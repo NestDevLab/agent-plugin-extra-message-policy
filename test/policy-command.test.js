@@ -652,6 +652,32 @@ test("always reply is allowed because runtime policy overrides native mention ga
   assert.equal(allowed.ok, true);
 });
 
+test("native disabled channel suppresses runtime always reply", () => {
+  const runtimePolicy = applyRuntimePolicy(
+    { respond: false, ingestMode: "all", matched: "config" },
+    {
+      respond: true,
+      requireMention: false,
+      ingestMode: "all",
+      runtimeResponseMode: "always",
+      runtimeIngestMode: "all",
+      runtimeMatched: "runtime-test"
+    },
+    { wasMentioned: true },
+    ctx
+  );
+
+  const effective = applyNativeMentionGatePolicy(runtimePolicy, {
+    enabled: false,
+    status: "off",
+    source: "channels.discord.accounts.chromiecraft-bot.guilds.788063059926712341.channels.123.enabled"
+  }, { wasMentioned: true }, ctx);
+
+  assert.equal(effective.respond, false);
+  assert.equal(effective.nativeEnabledGate, true);
+  assert.match(effective.matched, /native-disabled/);
+});
+
 test("subthreads inherit parent panel override until overwritten", () => {
   const commandConfig = normalizePolicyCommandConfig({});
   const parent = applyRuntimeCommand(
@@ -871,6 +897,46 @@ test("native requireMention status covers guild, wildcard, unset, and rendering"
   const unset = resolveNativeRequireMentionStatus({ guildId: "guild-3", channelId: "new" }, cfg);
   assert.equal(unset.status, "unset");
   assert.match(renderNativeRequireMentionStatus(unset), /requireMention: unset/);
+});
+
+test("native enabled status treats disabled wildcard as hard off unless channel is explicit", () => {
+  const cfg = {
+    channels: {
+      discord: {
+        accounts: {
+          "chromiecraft-bot": {
+            guilds: {
+              "788063059926712341": {
+                channels: {
+                  "*": { enabled: false, requireMention: true },
+                  "allowed": { enabled: true, requireMention: false }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+
+  const blocked = resolveNativeRequireMentionStatus({
+    accountId: "chromiecraft-bot",
+    guildId: "788063059926712341",
+    channelId: "other",
+    provider: "discord"
+  }, cfg);
+  const allowed = resolveNativeRequireMentionStatus({
+    accountId: "chromiecraft-bot",
+    guildId: "788063059926712341",
+    channelId: "allowed",
+    provider: "discord"
+  }, cfg);
+
+  assert.equal(blocked.enabled, false);
+  assert.match(blocked.source, /channels\.\*\.enabled$/);
+  assert.equal(allowed.enabled, true);
+  assert.equal(allowed.status, "off");
+  assert.match(allowed.source, /channels\.allowed\.requireMention$/);
 });
 
 test("native requireMention override errors on missing guild and channels", () => {
