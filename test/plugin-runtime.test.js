@@ -1027,14 +1027,24 @@ test("policy audit tool lists accessible Discord channels with effective policy"
         ok: true,
         status: 200,
         async text() {
+          const overflowChannels = Array.from({ length: 255 }, (_, index) => ({
+            id: `900000000000000${String(index).padStart(3, "0")}`,
+            name: `overflow-${index}`,
+            type: 0
+          }));
           return JSON.stringify([
             { id: "1505467773466443807", name: "chromie-garden", type: 0 },
-            { id: "1284884380661055568", name: "gm-general", type: 0 }
+            { id: "1284884380661055568", name: "gm-general", type: 0 },
+            ...overflowChannels,
+            { id: "1509999999999999999", name: "late-readable", type: 0 }
           ]);
         }
       };
     }
     if (textUrl.endsWith("/channels/1505467773466443807/messages?limit=1")) {
+      return { ok: true, status: 200, async text() { return "[]"; } };
+    }
+    if (textUrl.endsWith("/channels/1509999999999999999/messages?limit=1")) {
       return { ok: true, status: 200, async text() { return "[]"; } };
     }
     if (textUrl.endsWith("/channels/1284884380661055568/messages?limit=1")) {
@@ -1079,11 +1089,15 @@ test("policy audit tool lists accessible Discord channels with effective policy"
       guildId: "788063059926712341"
     });
     assert.match(accessible.content[0].text, /chromie-garden/);
+    assert.match(accessible.content[0].text, /late-readable/);
     assert.doesNotMatch(accessible.content[0].text, /gm-general/);
-    assert.equal(accessible.details.channels.length, 1);
-    assert.equal(accessible.details.channels[0].id, "1505467773466443807");
-    assert.equal(accessible.details.channels[0].access, "readable");
-    assert.equal(accessible.details.channels[0].policy.respond, true);
+    assert.equal(accessible.details.totalCandidates, 258);
+    assert.equal(accessible.details.channels.length, 2);
+    const garden = accessible.details.channels.find((channel) => channel.id === "1505467773466443807");
+    assert.equal(garden.access, "readable");
+    assert.equal(garden.policy.respond, true);
+    const late = accessible.details.channels.find((channel) => channel.id === "1509999999999999999");
+    assert.equal(late.access, "readable");
 
     const all = await tool.execute("tool-call", {
       accountId: "chromiecraft-bot",

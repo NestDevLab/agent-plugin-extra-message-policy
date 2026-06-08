@@ -181,7 +181,7 @@ function normalizeParams(params = {}) {
     onlyAccessible: params.onlyAccessible !== false,
     includeConfigured: params.includeConfigured !== false,
     includeDiscordList: params.includeDiscordList !== false,
-    maxChannels: Math.max(1, Math.min(250, Number(params.maxChannels || 100)))
+    maxChannels: Math.max(1, Math.min(1000, Number(params.maxChannels || 500)))
   };
 }
 
@@ -259,7 +259,7 @@ export function createPolicyAuditTool(api, pluginConfig, toolCtx = {}, options =
         },
         maxChannels: {
           type: "number",
-          description: "Maximum channels to inspect, capped at 250. Default 100."
+          description: "Maximum channels to inspect, capped at 1000. Default 500."
         }
       },
       required: ["guildId"]
