@@ -98,6 +98,52 @@ test("fixed native mention gate applies when no dynamic policy exists", () => {
   assert.equal(effective.nativeMentionGate, true);
 });
 
+test("explicit extra-message-policy response config overrides native mention gate", () => {
+  for (const nativeMode of ["unset", "off", "on"]) {
+    const nativeStatus = {
+      status: nativeMode,
+      source: "channels.discord.accounts.default.guilds.guild-1.channels.channel-1.requireMention"
+    };
+
+    const alwaysPolicy = resolvePolicy(
+      normalizeConfig({
+        defaultPolicy: { respond: false, ingestMode: "none" },
+        policies: [{ channelId: "channel-1", respond: true, ingestMode: "all" }]
+      }),
+      { wasMentioned: false },
+      ctx
+    );
+    const alwaysEffective = applyNativeMentionGatePolicy(alwaysPolicy, nativeStatus, { wasMentioned: false }, ctx);
+    assert.equal(alwaysEffective.respond, true, `respond:true must survive native=${nativeMode}`);
+    assert.equal(alwaysEffective.requireMention, undefined, `respond:true must not inherit native mention for native=${nativeMode}`);
+    assert.equal(alwaysEffective.nativeMentionGate, undefined, `explicit policy must skip native gate for native=${nativeMode}`);
+
+    const offPolicy = resolvePolicy(
+      normalizeConfig({
+        defaultPolicy: { respond: true, ingestMode: "all" },
+        policies: [{ channelId: "channel-1", respond: false, ingestMode: "all" }]
+      }),
+      { wasMentioned: true },
+      ctx
+    );
+    const offEffective = applyNativeMentionGatePolicy(offPolicy, nativeStatus, { wasMentioned: true }, ctx);
+    assert.equal(offEffective.respond, false, `respond:false must survive native=${nativeMode}`);
+    assert.equal(offEffective.requireMention, undefined, `respond:false must not inherit native mention for native=${nativeMode}`);
+
+    const mentionPolicy = resolvePolicy(
+      normalizeConfig({
+        defaultPolicy: { respond: true, ingestMode: "all" },
+        policies: [{ channelId: "channel-1", respond: true, ingestMode: "all", requireMention: true }]
+      }),
+      { wasMentioned: false },
+      ctx
+    );
+    const mentionEffective = applyNativeMentionGatePolicy(mentionPolicy, nativeStatus, { wasMentioned: false }, ctx);
+    assert.equal(mentionEffective.respond, false, `respond:mention must suppress unmentioned native=${nativeMode}`);
+    assert.equal(mentionEffective.requireMention, true, `respond:mention must keep explicit requireMention native=${nativeMode}`);
+  }
+});
+
 test("effective response policy matrix respects config, runtime, native gate, and mention state", async (t) => {
   const runtimeModes = [null, "off", "mention", "always"];
   const nativeModes = ["unset", "off", "on"];

@@ -562,6 +562,131 @@ test("golden flow: Discord runtime-shaped context suppresses unmentioned replies
   assert.deepEqual(outbound, { cancel: true });
 });
 
+test("golden flow: explicit response modes override native requireMention end-to-end", async () => {
+  const harness = await createHarness({
+    defaultPolicy: { respond: false, ingestMode: "none" },
+    policies: [
+      { channelId: "always-channel", respond: true, ingestMode: "all" },
+      { channelId: "off-channel", respond: false, ingestMode: "all" },
+      { channelId: "mention-channel", respond: true, ingestMode: "all", requireMention: true }
+    ]
+  }, {
+    channels: {
+      discord: {
+        accounts: {
+          default: {
+            botUserId: "1494581796120301598",
+            guilds: {
+              "guild-1": {
+                channels: {
+                  "*": { requireMention: true },
+                  "always-channel": { requireMention: true },
+                  "off-channel": { requireMention: false },
+                  "mention-channel": { requireMention: false }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  const alwaysCtx = {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "always-channel",
+    conversationId: "channel:always-channel",
+    sessionKey: "agent:main:discord:channel:always-channel",
+    senderId: "user-1",
+    messageId: "msg-always-native-on"
+  };
+  const alwaysDispatch = await harness.emit("before_dispatch", {
+    messageId: "msg-always-native-on",
+    content: "plain message that native would normally skip",
+    wasMentioned: false,
+    timestamp: Date.now()
+  }, alwaysCtx);
+  const alwaysOutbound = await harness.emit("message_sending", { content: "reply" }, alwaysCtx);
+  assert.equal(alwaysDispatch, undefined);
+  assert.deepEqual(alwaysOutbound, { replyTo: "msg-always-native-on" });
+
+  for (const scenario of [
+    {
+      suffix: "plain",
+      event: { content: "plain but explicitly disabled", wasMentioned: false }
+    },
+    {
+      suffix: "mention",
+      event: { content: "<@1494581796120301598> explicitly disabled", wasMentioned: true }
+    },
+    {
+      suffix: "reply",
+      event: {
+        content: "reply to bot but explicitly disabled",
+        metadata: { referenced_message: { author: { id: "1494581796120301598" } } }
+      }
+    }
+  ]) {
+    const messageId = `msg-off-${scenario.suffix}`;
+    const ctx = {
+      accountId: "default",
+      guildId: "guild-1",
+      channelId: "off-channel",
+      conversationId: "channel:off-channel",
+      sessionKey: "agent:main:discord:channel:off-channel",
+      senderId: "user-1",
+      messageId
+    };
+    const dispatch = await harness.emit("before_dispatch", {
+      messageId,
+      timestamp: Date.now(),
+      ...scenario.event
+    }, ctx);
+    const outbound = await harness.emit("message_sending", { content: "should not send" }, ctx);
+    assert.deepEqual(dispatch, { handled: true }, `respond:false must suppress ${scenario.suffix}`);
+    assert.deepEqual(outbound, { cancel: true }, `respond:false outbound guard must cancel ${scenario.suffix}`);
+  }
+
+  const mentionPlainCtx = {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "mention-channel",
+    conversationId: "channel:mention-channel",
+    sessionKey: "agent:main:discord:channel:mention-channel",
+    senderId: "user-1",
+    messageId: "msg-mention-plain"
+  };
+  const mentionPlainDispatch = await harness.emit("before_dispatch", {
+    messageId: "msg-mention-plain",
+    content: "plain message with native off but plugin mention mode",
+    wasMentioned: false,
+    timestamp: Date.now()
+  }, mentionPlainCtx);
+  const mentionPlainOutbound = await harness.emit("message_sending", { content: "should not send" }, mentionPlainCtx);
+  assert.deepEqual(mentionPlainDispatch, { handled: true });
+  assert.deepEqual(mentionPlainOutbound, { cancel: true });
+
+  const mentionReplyCtx = {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "mention-channel",
+    conversationId: "channel:mention-channel",
+    sessionKey: "agent:main:discord:channel:mention-channel",
+    senderId: "user-1",
+    messageId: "msg-mention-reply"
+  };
+  const mentionReplyDispatch = await harness.emit("before_dispatch", {
+    messageId: "msg-mention-reply",
+    content: "reply to bot in plugin mention mode",
+    metadata: { referenced_message: { author: { id: "1494581796120301598" } } },
+    timestamp: Date.now()
+  }, mentionReplyCtx);
+  const mentionReplyOutbound = await harness.emit("message_sending", { content: "reply" }, mentionReplyCtx);
+  assert.equal(mentionReplyDispatch, undefined);
+  assert.deepEqual(mentionReplyOutbound, { replyTo: "msg-mention-reply" });
+});
+
 test("golden flow: guild-scoped Discord policy suppresses rawGuildId runtime contexts", async () => {
   const jsonlPath = path.join(os.tmpdir(), `extra-policy-${Date.now()}-raw-guild.jsonl`);
   const harness = await createHarness({

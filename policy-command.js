@@ -517,6 +517,7 @@ export function applyRuntimePolicy(basePolicy, runtimeOverride, event = {}, ctx 
 
 export function applyNativeMentionGatePolicy(policy = {}, nativeStatus = {}, event = {}, ctx = {}) {
   if (policy.runtimeResponseMode) return policy;
+  if (policy.matched && policy.matched !== "default") return policy;
   if (nativeStatus?.status !== "on" || policy.requireMention === true) return policy;
   const merged = {
     ...policy,
