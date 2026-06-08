@@ -137,9 +137,13 @@ function platformFromContext(event = {}, ctx = {}) {
     ctx.platform,
     ctx.provider,
     ctx.surface,
+    ctx.channel,
+    ctx.channelId,
     event.platform,
     event.provider,
     event.surface,
+    event.channel,
+    event.channelId,
     ctx.metadata?.platform,
     ctx.metadata?.provider,
     event.metadata?.platform,
@@ -742,16 +746,11 @@ function inferDiscordGuildIdFromScope(discordScope, cfg, zoneId) {
 }
 
 export function resolveNativeRequireMentionTarget(ctx = {}, cfg = {}) {
-  const provider = textValue(
-    ctx.messageProvider,
-    ctx.provider,
-    ctx.channel,
-    ctx.message?.channel,
-    ctx.message?.provider,
-    ctx.metadata?.channel,
-    ctx.metadata?.provider
-  ).toLowerCase();
-  if (provider && provider !== "discord") return { error: "This permanent config operation currently supports Discord only." };
+  const platform = platformFromContext({}, {
+    ...ctx,
+    platform: textValue(ctx.platform, ctx.messageProvider, ctx.provider, ctx.channel, ctx.message?.channel, ctx.message?.provider, ctx.metadata?.channel, ctx.metadata?.provider)
+  });
+  if (platform !== "discord") return { error: "This permanent config operation currently supports Discord only." };
 
   const directChannelId = textValue(
     ctx.threadId,

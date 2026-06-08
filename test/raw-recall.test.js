@@ -8,10 +8,16 @@ import { buildRawRecallGuidance, createRawContextSearchTool, extractTerms, listR
 test("raw recall triggers on project-status phrasing and returns matching JSONL excerpts", async () => {
   const tmp = await mkdtemp(path.join(os.tmpdir(), "extra-message-policy-"));
   try {
-    const dayDir = path.join(tmp, "2026", "05", "08");
+    const now = new Date();
+    const dayDir = path.join(
+      tmp,
+      String(now.getUTCFullYear()),
+      String(now.getUTCMonth() + 1).padStart(2, "0"),
+      String(now.getUTCDate()).padStart(2, "0")
+    );
     await mkdir(dayDir, { recursive: true });
     await writeFile(path.join(dayDir, "channel_123.jsonl"), `${JSON.stringify({
-      observedAt: "2026-05-08T10:00:00.000Z",
+      observedAt: now.toISOString(),
       conversationId: "channel:123",
       content: "Project Phoenix deploy is blocked by auth refresh issues",
       metadata: { channelName: "#ops", senderName: "Alice" }

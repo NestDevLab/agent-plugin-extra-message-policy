@@ -450,7 +450,7 @@ test("golden flow: Discord reply to bot satisfies requireMention policy", async 
   assert.deepEqual(outbound, { replyTo: "msg-reply-mention" });
 });
 
-test("golden flow: configured plain bot name satisfies requireMention policy", async () => {
+test("golden flow: configured @bot name satisfies requireMention policy while plain name does not", async () => {
   const harness = await createHarness({
     defaultPolicy: { respond: false, ingestMode: "all" },
     policies: [
@@ -470,23 +470,32 @@ test("golden flow: configured plain bot name satisfies requireMention policy", a
     }
   });
 
-  const event = {
-    messageId: "msg-name-mention",
-    content: "Policy Bot can you check this?",
-    timestamp: Date.now()
-  };
   const ctx = {
     accountId: "default",
     guildId: "guild-1",
     channelId: "name-channel",
     conversationId: "channel:name-channel",
     sessionKey: "agent:main:discord:channel:name-channel",
-    senderId: "user-1",
-    messageId: "msg-name-mention"
+    senderId: "user-1"
   };
 
-  const dispatch = await harness.emit("before_dispatch", event, ctx);
-  const outbound = await harness.emit("message_sending", { content: "reply" }, ctx);
+  const plainDispatch = await harness.emit("before_dispatch", {
+    messageId: "msg-name-plain",
+    content: "Policy Bot can you check this?",
+    timestamp: Date.now()
+  }, { ...ctx, messageId: "msg-name-plain" });
+  assert.deepEqual(plainDispatch, { handled: true });
+  const plainOutbound = await harness.emit("message_sending", { content: "reply" }, { ...ctx, messageId: "msg-name-plain" });
+  assert.deepEqual(plainOutbound, { cancel: true });
+
+  const event = {
+    messageId: "msg-name-mention",
+    content: "@Policy Bot can you check this?",
+    timestamp: Date.now()
+  };
+  const mentionedCtx = { ...ctx, messageId: "msg-name-mention" };
+  const dispatch = await harness.emit("before_dispatch", event, mentionedCtx);
+  const outbound = await harness.emit("message_sending", { content: "reply" }, mentionedCtx);
 
   assert.equal(dispatch, undefined);
   assert.deepEqual(outbound, { replyTo: "msg-name-mention" });
@@ -760,11 +769,17 @@ test("golden flow: JSONL sharding, HTTP sink, dedupe, and sink failures", async 
 
 test("golden flow: startup raw recall and registered search tool handle success and failure", async () => {
   const tmp = await mkdtemp(path.join(os.tmpdir(), "extra-policy-raw-"));
-  const dayDir = path.join(tmp, "2026", "05", "30");
+  const now = new Date();
+  const dayDir = path.join(
+    tmp,
+    String(now.getUTCFullYear()),
+    String(now.getUTCMonth() + 1).padStart(2, "0"),
+    String(now.getUTCDate()).padStart(2, "0")
+  );
   await writeFile(path.join(tmp, "placeholder"), "", "utf8").catch(() => {});
   await import("node:fs/promises").then(({ mkdir }) => mkdir(dayDir, { recursive: true }));
   await writeFile(path.join(dayDir, "channel.jsonl"), `${JSON.stringify({
-    observedAt: "2026-05-30T10:00:00.000Z",
+    observedAt: now.toISOString(),
     conversationId: "channel:raw",
     content: "Runtime startup recall should find Falcon context",
     metadata: { channelName: "#ops", senderName: "Tester" }

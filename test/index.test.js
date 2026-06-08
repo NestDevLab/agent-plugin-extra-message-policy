@@ -103,7 +103,47 @@ test("derived mention facts detect Discord bot id mentions from account token", 
   assert.equal(deriveMentionFact(event, {}, cfg), true);
 });
 
-test("derived mention facts detect configured account names", () => {
+test("native Discord reply to configured bot overrides explicit false mention fact", () => {
+  const botId = "111111111111111111";
+  const cfg = {
+    channels: {
+      discord: {
+        accounts: {
+          default: { botUserId: botId }
+        }
+      }
+    }
+  };
+  const event = {
+    content: "yes, do that",
+    accountId: "default",
+    sessionKey: "agent:main:discord:channel:room-1",
+    wasMentioned: false,
+    metadata: {
+      referenced_message: { author: { id: botId } }
+    }
+  };
+
+  const enriched = withDerivedMentionFact({ mentionFacts: new Map() }, event, {}, cfg, {});
+
+  assert.equal(enriched.event.wasMentioned, true);
+  assert.equal(enriched.ctx.wasMentioned, true);
+});
+
+test("derived mention facts detect configured account names only with @ by default", () => {
+  const plain = withDerivedMentionFact(
+    { mentionFacts: new Map() },
+    {
+      content: "Agent Alpha can you reply?",
+      accountId: "default",
+      sessionKey: "agent:main:discord:channel:room-1"
+    },
+    {},
+    {},
+    { mentionDetection: { accounts: { default: { names: ["Agent Alpha"] } } } }
+  );
+  assert.equal(plain.event.wasMentioned, undefined);
+
   const event = {
     content: "@Agent Alpha can you reply?",
     accountId: "default",
@@ -220,7 +260,7 @@ test("derived mention facts cover configured patterns, invalid patterns, arrays,
   }, {}, cfg), true);
 
   assert.equal(deriveMentionFact({
-    content: "hello default bot",
+    content: "hello @Default Bot",
     accountId: "default",
     sessionKey: "agent:other:discord:channel:room"
   }, {}, cfg), true);

@@ -227,16 +227,19 @@ function configuredMentionPatterns(cfg = {}, pluginConfig = {}, accountId = "", 
   return source;
 }
 
-function matchesConfiguredName(text, names = []) {
+function matchesConfiguredName(text, names = [], options = {}) {
   const normalized = normalizeMentionText(text);
+  const namesRequireAt = options.namesRequireAt !== false;
   return names.some((name) => {
     const parts = normalizeMentionText(name).split(/\s+/).filter(Boolean).map(escapeRegExp);
     if (parts.length === 0) return false;
-    const pattern = String.raw`(^|[^\p{L}\p{N}_])@?${parts.join(String.raw`\s+`)}([^\p{L}\p{N}_]|$)`;
+    const atPrefix = namesRequireAt ? "@" : "@?";
+    const pattern = String.raw`(^|[^\p{L}\p{N}_])${atPrefix}${parts.join(String.raw`\s+`)}([^\p{L}\p{N}_]|$)`;
     try {
       return new RegExp(pattern, "iu").test(normalized);
     } catch {
-      return normalized.includes(`@${normalizeMentionText(name)}`);
+      const normalizedName = normalizeMentionText(name);
+      return namesRequireAt ? normalized.includes(`@${normalizedName}`) : (normalized.includes(`@${normalizedName}`) || normalized.includes(normalizedName));
     }
   });
 }
@@ -319,12 +322,24 @@ export function deriveMentionFact(event = {}, ctx = {}, cfg = {}, pluginConfig =
   const botIds = configuredBotIds(cfg, pluginConfig, accountId);
   if (matchesDiscordBotMention(text, botIds)) return true;
   if (matchesConfiguredPatterns(text, configuredMentionPatterns(cfg, pluginConfig, accountId, agentId))) return true;
-  if (matchesConfiguredName(text, configuredMentionNames(cfg, pluginConfig, accountId, agentId))) return true;
+  const detection = accountDetectionConfig(pluginConfig, accountId);
+  if (matchesConfiguredName(
+    text,
+    configuredMentionNames(cfg, pluginConfig, accountId, agentId),
+    { namesRequireAt: detection.namesRequireAt }
+  )) return true;
   return undefined;
 }
 
 export function withDerivedMentionFact(state, event = {}, ctx = {}, cfg = {}, pluginConfig = {}) {
   const recalled = withRecalledMentionFact(state, event, ctx);
+  const replyMention = deriveNativeReplyMentionFact(recalled.event, recalled.ctx, cfg, pluginConfig);
+  if (replyMention === true) {
+    return {
+      event: { ...recalled.event, wasMentioned: true },
+      ctx: { ...recalled.ctx, wasMentioned: true }
+    };
+  }
   if (typeof recalled.event.wasMentioned === "boolean" || typeof recalled.ctx.wasMentioned === "boolean") {
     return recalled;
   }

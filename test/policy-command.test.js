@@ -774,6 +774,20 @@ test("native requireMention target reports unsupported and unresolved contexts",
   assert.deepEqual(resolveNativeRequireMentionTarget({ provider: "telegram" }, cfg), {
     error: "This permanent config operation currently supports Discord only."
   });
+  assert.deepEqual(resolveNativeRequireMentionTarget({ platform: "telegram" }, cfg), {
+    error: "This permanent config operation currently supports Discord only."
+  });
+  assert.deepEqual(resolveNativeRequireMentionTarget({
+    sessionKey: "agent:main:telegram:group:-100123:topic:421"
+  }, cfg), {
+    error: "This permanent config operation currently supports Discord only."
+  });
+  assert.deepEqual(resolveNativeRequireMentionTarget({
+    channelId: "telegram",
+    sessionKey: "agent:main:main"
+  }, cfg), {
+    error: "This permanent config operation currently supports Discord only."
+  });
   assert.deepEqual(resolveNativeRequireMentionTarget({ provider: "discord" }, cfg), {
     error: "Unable to resolve the current Discord channel or thread."
   });
