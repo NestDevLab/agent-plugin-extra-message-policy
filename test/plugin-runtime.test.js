@@ -1035,6 +1035,7 @@ test("policy audit tool lists accessible Discord channels with effective policy"
           return JSON.stringify([
             { id: "1505467773466443807", name: "chromie-garden", type: 0 },
             { id: "1284884380661055568", name: "gm-general", type: 0 },
+            { id: "1513056955319713872", name: "Chromie's Citadel", type: 4 },
             ...overflowChannels,
             { id: "1509999999999999999", name: "late-readable", type: 0 }
           ]);
@@ -1047,6 +1048,23 @@ test("policy audit tool lists accessible Discord channels with effective policy"
     if (textUrl.endsWith("/channels/1509999999999999999/messages?limit=1")) {
       return { ok: true, status: 200, async text() { return "[]"; } };
     }
+    if (textUrl.endsWith("/channels/1513056955319713872/messages?limit=1")) {
+      return { ok: true, status: 200, async text() { return "[]"; } };
+    }
+    if (textUrl.endsWith("/channels/1497843035126632548")) {
+      return {
+        ok: true,
+        status: 200,
+        async text() {
+          return JSON.stringify({
+            id: "1497843035126632548",
+            name: "other-guild-channel",
+            type: 0,
+            guild_id: "1495100643952693258"
+          });
+        }
+      };
+    }
     if (textUrl.endsWith("/channels/1284884380661055568/messages?limit=1")) {
       return { ok: false, status: 403, async text() { return "{}"; } };
     }
@@ -1058,7 +1076,8 @@ test("policy audit tool lists accessible Discord channels with effective policy"
       defaultPolicy: { respond: true, ingestMode: "all" },
       policies: [
         { guildId: "788063059926712341", respond: false, ingestMode: "all" },
-        { channelId: "1505467773466443807", respond: true, ingestMode: "all" }
+        { channelId: "1505467773466443807", respond: true, ingestMode: "all" },
+        { channelId: "1497843035126632548", respond: true, ingestMode: "all" }
       ]
     }, {
       channels: {
@@ -1091,7 +1110,10 @@ test("policy audit tool lists accessible Discord channels with effective policy"
     assert.match(accessible.content[0].text, /chromie-garden/);
     assert.match(accessible.content[0].text, /late-readable/);
     assert.doesNotMatch(accessible.content[0].text, /gm-general/);
-    assert.equal(accessible.details.totalCandidates, 258);
+    assert.doesNotMatch(accessible.content[0].text, /Chromie's Citadel/);
+    assert.doesNotMatch(accessible.content[0].text, /other-guild-channel/);
+    assert.equal(accessible.details.totalCandidates, 260);
+    assert.equal(accessible.details.totalGuildCandidates, 259);
     assert.equal(accessible.details.channels.length, 2);
     const garden = accessible.details.channels.find((channel) => channel.id === "1505467773466443807");
     assert.equal(garden.access, "readable");
@@ -1109,6 +1131,10 @@ test("policy audit tool lists accessible Discord channels with effective policy"
     assert.equal(gm.native.enabled, false);
     assert.equal(gm.policy.respond, false);
     assert.equal(gm.accountlessPolicy.respond, false);
+    const category = all.details.channels.find((channel) => channel.id === "1513056955319713872");
+    assert.equal(category.access, "not_message_channel");
+    const crossGuild = all.details.channels.find((channel) => channel.id === "1497843035126632548");
+    assert.equal(crossGuild, undefined);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalToken === undefined) delete process.env.TEST_DISCORD_TOKEN;

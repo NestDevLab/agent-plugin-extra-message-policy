@@ -70,8 +70,32 @@ async function listDiscordGuildChannels(fetchImpl, token, guildId) {
   };
 }
 
-async function probeReadAccess(fetchImpl, token, channelId) {
-  const result = await discordFetch(fetchImpl, token, `/channels/${encodeURIComponent(channelId)}/messages?limit=1`);
+async function getDiscordChannel(fetchImpl, token, channelId) {
+  const result = await discordFetch(fetchImpl, token, `/channels/${encodeURIComponent(channelId)}`);
+  if (!result.ok || !result.json || typeof result.json !== "object") {
+    return { ok: false, status: result.status, channel: null };
+  }
+  return {
+    ok: true,
+    status: result.status,
+    channel: {
+      id: textValue(result.json.id),
+      name: textValue(result.json.name),
+      type: result.json.type,
+      parentId: textValue(result.json.parent_id),
+      guildId: textValue(result.json.guild_id)
+    }
+  };
+}
+
+function isMessageChannelType(type) {
+  if (type === undefined || type === null) return true;
+  return [0, 5, 10, 11, 12, 15].includes(Number(type));
+}
+
+async function probeReadAccess(fetchImpl, token, channel) {
+  if (!isMessageChannelType(channel.type)) return { access: "not_message_channel", status: null };
+  const result = await discordFetch(fetchImpl, token, `/channels/${encodeURIComponent(channel.id)}/messages?limit=1`);
   if (result.ok) return { access: "readable", status: result.status };
   if (result.status === 403 || result.status === 404) return { access: "no_access", status: result.status };
   if (result.status === 429) return { access: "rate_limited", status: result.status };
@@ -188,7 +212,7 @@ function normalizeParams(params = {}) {
 function formatAuditText(result) {
   const lines = [
     `Policy audit for account ${result.accountId} / guild ${result.guildId}`,
-    `Channels: ${result.channels.length}${result.totalCandidates !== result.channels.length ? ` shown / ${result.totalCandidates} candidates` : ""}`,
+    `Channels: ${result.channels.length}${result.totalGuildCandidates !== result.channels.length ? ` shown / ${result.totalGuildCandidates} guild candidates` : ""}${result.totalCandidates !== result.totalGuildCandidates ? ` (${result.totalCandidates} raw candidates)` : ""}`,
     `Discord list: ${result.discordList.ok ? "ok" : result.discordList.error || "not used"}`
   ];
   for (const channel of result.channels.slice(0, 80)) {
@@ -288,9 +312,22 @@ export function createPolicyAuditTool(api, pluginConfig, toolCtx = {}, options =
       }
 
       const rows = [];
-      for (const channel of [...candidates.values()].slice(0, normalized.maxChannels)) {
+      const hydrated = [];
+      for (const candidate of candidates.values()) {
+        let channel = candidate;
+        if (token && (!channel.name || channel.type === undefined || channel.source !== "discord-list")) {
+          const lookup = await getDiscordChannel(fetchImpl, token, channel.id);
+          if (lookup.ok && lookup.channel?.id) {
+            channel = { ...channel, ...lookup.channel };
+          }
+        }
+        if (channel.guildId && channel.guildId !== normalized.guildId) continue;
+        hydrated.push(channel);
+      }
+
+      for (const channel of hydrated.slice(0, normalized.maxChannels)) {
         let probe = { access: token && normalized.probeRead ? "unknown" : "not_probed", status: null };
-        if (token && normalized.probeRead) probe = await probeReadAccess(fetchImpl, token, channel.id);
+        if (token && normalized.probeRead) probe = await probeReadAccess(fetchImpl, token, channel);
         if (normalized.onlyAccessible && probe.access !== "readable") continue;
         const native = resolveNativeChannelPolicy(openclawConfig, normalized.accountId, normalized.guildId, channel);
         const policy = policyForChannel(pluginConfig, openclawConfig, normalized.accountId, normalized.guildId, channel);
@@ -318,6 +355,7 @@ export function createPolicyAuditTool(api, pluginConfig, toolCtx = {}, options =
           status: discordList.status,
           error: discordList.error || ""
         },
+        totalGuildCandidates: hydrated.length,
         channels: rows
       };
       return textResult(formatAuditText(result), result);
