@@ -562,6 +562,45 @@ test("golden flow: Discord runtime-shaped context suppresses unmentioned replies
   assert.deepEqual(outbound, { cancel: true });
 });
 
+test("golden flow: guild-scoped Discord policy suppresses rawGuildId runtime contexts", async () => {
+  const jsonlPath = path.join(os.tmpdir(), `extra-policy-${Date.now()}-raw-guild.jsonl`);
+  const harness = await createHarness({
+    defaultPolicy: { respond: true, ingestMode: "all" },
+    policies: [
+      { accountId: "chromiecraft-bot", guildId: "788063059926712341", respond: false, ingestMode: "all" },
+      { accountId: "chromiecraft-bot", channelId: "1507016260620255392", respond: true, ingestMode: "all" }
+    ],
+    jsonlSink: { enabled: true, path: jsonlPath }
+  });
+
+  const event = {
+    MessageId: "msg-raw-guild-suppress",
+    content: "public channel message",
+    timestamp: Date.now()
+  };
+  const ctx = {
+    accountId: "chromiecraft-bot",
+    rawGuildId: "788063059926712341",
+    channelId: "1513433142198014025",
+    conversationId: "channel:1513433142198014025",
+    sessionKey: "agent:chromiecraft-bot:discord:channel:1513433142198014025",
+    senderId: "user-1",
+    messageId: "msg-raw-guild-suppress"
+  };
+
+  await harness.emit("message_received", event, ctx);
+  const dispatch = await harness.emit("before_dispatch", event, ctx);
+  const outbound = await harness.emit("message_sending", { content: "should not send" }, ctx);
+
+  assert.deepEqual(dispatch, { handled: true });
+  assert.deepEqual(outbound, { cancel: true });
+  const rows = await readJsonl(jsonlPath);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].policy.respond, false);
+  assert.equal(rows[0].policy.ingestMode, "all");
+  assert.equal(rows[0].policy.matched, "guildId:788063059926712341,accountId:chromiecraft-bot");
+});
+
 test("golden flow: runtime mention fact survives uppercase inbound fields", async () => {
   const harness = await createHarness({
     defaultPolicy: { respond: true, ingestMode: "all" },

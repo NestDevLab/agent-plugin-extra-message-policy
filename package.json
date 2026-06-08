@@ -31,6 +31,7 @@
   },
   "files": [
     "index.js",
+    "plugin-runtime.js",
     "policy.js",
     "policy-command.js",
     "native-reply.js",

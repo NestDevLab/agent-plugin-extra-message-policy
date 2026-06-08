@@ -214,8 +214,16 @@ export function ruleMatches(rule, event = {}, ctx = {}) {
     ctxValue(ctx, event, "guildId"),
     ctxValue(ctx, event, "guild"),
     ctxValue(ctx, event, "GroupSpace"),
+    ctxValue(ctx, event, "rawGuildId"),
+    ctxValue(ctx, event, "RawGuildId"),
     String(event?.metadata?.guildId ?? ""),
-    String(ctx?.metadata?.guildId ?? "")
+    String(event?.metadata?.guild_id ?? ""),
+    String(event?.metadata?.rawGuildId ?? ""),
+    String(event?.metadata?.raw_guild_id ?? ""),
+    String(ctx?.metadata?.guildId ?? ""),
+    String(ctx?.metadata?.guild_id ?? ""),
+    String(ctx?.metadata?.rawGuildId ?? ""),
+    String(ctx?.metadata?.raw_guild_id ?? "")
   ].includes(rule.guildId)) return false;
   if (rule.accountId && ![
     ctxValue(ctx, event, "accountId"),
