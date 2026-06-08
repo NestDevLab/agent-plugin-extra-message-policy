@@ -159,7 +159,7 @@ test("golden flow: Telegram policy matches chat aliases and suppresses reply end
   const outbound = await harness.emit("message_sending", { content: "suppressed reply" }, ctx);
 
   assert.deepEqual(dispatch, { handled: true });
-  assert.deepEqual(outbound, { cancel: true });
+  assert.equal(outbound?.cancel, undefined);
 
   const rows = await readJsonl(jsonlPath);
   assert.equal(rows.length, 1);
@@ -167,7 +167,7 @@ test("golden flow: Telegram policy matches chat aliases and suppresses reply end
   assert.equal(rows[0].policy.matched, "channelId:-100123");
 });
 
-test("Discord guild-wide ingest policy cancels outbound replies without remembered message id", async () => {
+test("Discord guild-wide ingest policy suppresses before dispatch without cancelling delivery hooks", async () => {
   const harness = await createHarness({
     defaultPolicy: { respond: true, ingestMode: "all" },
     policies: [
@@ -194,7 +194,7 @@ test("Discord guild-wide ingest policy cancels outbound replies without remember
     senderId: "user-1"
   });
 
-  assert.deepEqual(suppressed, { cancel: true });
+  assert.equal(suppressed?.cancel, undefined);
   assert.equal(allowed, undefined);
 });
 
@@ -248,7 +248,7 @@ test("Discord dispatch reuses remembered guild route when dispatch context omits
   });
 
   assert.deepEqual(dispatch, { handled: true });
-  assert.deepEqual(outbound, { cancel: true });
+  assert.equal(outbound?.cancel, undefined);
 });
 
 test("golden flow: runtime always override forces reply context over suppressed base policy", async () => {
@@ -479,7 +479,7 @@ test("golden flow: Telegram topic session is suppressed by group chat policy", a
   const outbound = await harness.emit("message_sending", { content: "suppressed reply" }, ctx);
 
   assert.deepEqual(dispatch, { handled: true });
-  assert.deepEqual(outbound, { cancel: true });
+  assert.equal(outbound?.cancel, undefined);
 
   const rows = await readJsonl(jsonlPath);
   assert.equal(rows.length, 1);
@@ -570,7 +570,7 @@ test("golden flow: configured @bot name satisfies requireMention policy while pl
   }, { ...ctx, messageId: "msg-name-plain" });
   assert.deepEqual(plainDispatch, { handled: true });
   const plainOutbound = await harness.emit("message_sending", { content: "reply" }, { ...ctx, messageId: "msg-name-plain" });
-  assert.deepEqual(plainOutbound, { cancel: true });
+  assert.equal(plainOutbound?.cancel, undefined);
 
   const event = {
     messageId: "msg-name-mention",
@@ -643,7 +643,7 @@ test("golden flow: Discord runtime-shaped context suppresses unmentioned replies
   });
 
   assert.deepEqual(dispatch, { handled: true });
-  assert.deepEqual(outbound, { cancel: true });
+  assert.equal(outbound?.cancel, undefined);
 });
 
 test("golden flow: explicit response modes override native requireMention end-to-end", async () => {
@@ -729,7 +729,7 @@ test("golden flow: explicit response modes override native requireMention end-to
     }, ctx);
     const outbound = await harness.emit("message_sending", { content: "should not send" }, ctx);
     assert.deepEqual(dispatch, { handled: true }, `respond:false must suppress ${scenario.suffix}`);
-    assert.deepEqual(outbound, { cancel: true }, `respond:false outbound guard must cancel ${scenario.suffix}`);
+    assert.equal(outbound?.cancel, undefined, `respond:false must not cancel delivery hook for ${scenario.suffix}`);
   }
 
   const mentionPlainCtx = {
@@ -749,7 +749,7 @@ test("golden flow: explicit response modes override native requireMention end-to
   }, mentionPlainCtx);
   const mentionPlainOutbound = await harness.emit("message_sending", { content: "should not send" }, mentionPlainCtx);
   assert.deepEqual(mentionPlainDispatch, { handled: true });
-  assert.deepEqual(mentionPlainOutbound, { cancel: true });
+  assert.equal(mentionPlainOutbound?.cancel, undefined);
 
   const mentionReplyCtx = {
     accountId: "default",
@@ -802,7 +802,7 @@ test("golden flow: guild-scoped Discord policy suppresses rawGuildId runtime con
   const outbound = await harness.emit("message_sending", { content: "should not send" }, ctx);
 
   assert.deepEqual(dispatch, { handled: true });
-  assert.deepEqual(outbound, { cancel: true });
+  assert.equal(outbound?.cancel, undefined);
   const rows = await readJsonl(jsonlPath);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].policy.respond, false);
@@ -840,7 +840,7 @@ test("golden flow: accountless guild policy suppresses Discord contexts missing 
   const outbound = await harness.emit("message_sending", { content: "should not send" }, ctx);
 
   assert.deepEqual(dispatch, { handled: true });
-  assert.deepEqual(outbound, { cancel: true });
+  assert.equal(outbound?.cancel, undefined);
   const rows = await readJsonl(jsonlPath);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].policy.respond, false);
@@ -1337,7 +1337,7 @@ test("approval prompt handling covers persisted strings, arrays, text fields, ca
   }), { cancel: true });
 });
 
-test("response suppression memory prunes old keys after many dispatches", async () => {
+test("response suppression memory prunes old keys without cancelling delivery hooks", async () => {
   const harness = await createHarness({
     defaultPolicy: { respond: false, ingestMode: "none" }
   });
@@ -1357,9 +1357,9 @@ test("response suppression memory prunes old keys after many dispatches", async 
   assert.equal(await harness.emit("message_sending", { content: "old" }, {
     messageId: "msg-0"
   }), undefined);
-  assert.deepEqual(await harness.emit("message_sending", { content: "new" }, {
+  assert.equal((await harness.emit("message_sending", { content: "new" }, {
     messageId: "msg-2004"
-  }), { cancel: true });
+  }))?.cancel, undefined);
 });
 
 test("policy command handler falls back to help for unknown action", async () => {

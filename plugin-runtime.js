@@ -751,12 +751,9 @@ export function registerExtraMessagePolicy(api, options = {}) {
         ? { ...(nativeReplyPatch || {}), content: approvalPromptHandling.replacementText }
         : { cancel: true };
     }
-    const rememberedResponse = lookupRememberedResponse(state, ctx);
-    if (rememberedResponse === false) return { cancel: true };
-    if (rememberedResponse !== true && hasPolicyRoutingContext(ctx)) {
-      const policy = await resolveEffectivePolicy(event, ctx);
-      if (policy?.respond === false) return { cancel: true };
-    }
+    // Final delivery hooks run after a visible reply already exists. Normal
+    // response policy suppression must happen in before_dispatch; cancelling
+    // here leaves Discord final delivery with no delivered message id.
     if (nativeReplyPatch) return nativeReplyPatch;
   });
 }
