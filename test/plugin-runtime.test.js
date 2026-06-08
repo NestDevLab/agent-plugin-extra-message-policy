@@ -1016,6 +1016,92 @@ test("golden flow: startup raw recall and registered search tool handle success 
   assert.equal(noRecall.prependContext, "");
 });
 
+test("policy audit tool lists accessible Discord channels with effective policy", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalToken = process.env.TEST_DISCORD_TOKEN;
+  process.env.TEST_DISCORD_TOKEN = "test-token";
+  globalThis.fetch = async (url) => {
+    const textUrl = String(url);
+    if (textUrl.endsWith("/guilds/788063059926712341/channels")) {
+      return {
+        ok: true,
+        status: 200,
+        async text() {
+          return JSON.stringify([
+            { id: "1505467773466443807", name: "chromie-garden", type: 0 },
+            { id: "1284884380661055568", name: "gm-general", type: 0 }
+          ]);
+        }
+      };
+    }
+    if (textUrl.endsWith("/channels/1505467773466443807/messages?limit=1")) {
+      return { ok: true, status: 200, async text() { return "[]"; } };
+    }
+    if (textUrl.endsWith("/channels/1284884380661055568/messages?limit=1")) {
+      return { ok: false, status: 403, async text() { return "{}"; } };
+    }
+    return { ok: false, status: 404, async text() { return "{}"; } };
+  };
+
+  try {
+    const harness = await createHarness({
+      defaultPolicy: { respond: true, ingestMode: "all" },
+      policies: [
+        { guildId: "788063059926712341", respond: false, ingestMode: "all" },
+        { channelId: "1505467773466443807", respond: true, ingestMode: "all" }
+      ]
+    }, {
+      channels: {
+        discord: {
+          enabled: true,
+          accounts: {
+            "chromiecraft-bot": {
+              enabled: true,
+              token: { source: "env", id: "TEST_DISCORD_TOKEN" },
+              guilds: {
+                "788063059926712341": {
+                  channels: {
+                    "*": { enabled: true, requireMention: false },
+                    "1284884380661055568": { enabled: false, requireMention: true },
+                    "1505467773466443807": { enabled: true, requireMention: false }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    const tool = harness.tools.find((entry) => entry.options?.name === "list_extra_message_policies").factory({});
+    const accessible = await tool.execute("tool-call", {
+      accountId: "chromiecraft-bot",
+      guildId: "788063059926712341"
+    });
+    assert.match(accessible.content[0].text, /chromie-garden/);
+    assert.doesNotMatch(accessible.content[0].text, /gm-general/);
+    assert.equal(accessible.details.channels.length, 1);
+    assert.equal(accessible.details.channels[0].id, "1505467773466443807");
+    assert.equal(accessible.details.channels[0].access, "readable");
+    assert.equal(accessible.details.channels[0].policy.respond, true);
+
+    const all = await tool.execute("tool-call", {
+      accountId: "chromiecraft-bot",
+      guildId: "788063059926712341",
+      onlyAccessible: false
+    });
+    const gm = all.details.channels.find((channel) => channel.id === "1284884380661055568");
+    assert.equal(gm.access, "no_access");
+    assert.equal(gm.native.enabled, false);
+    assert.equal(gm.policy.respond, false);
+    assert.equal(gm.accountlessPolicy.respond, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalToken === undefined) delete process.env.TEST_DISCORD_TOKEN;
+    else process.env.TEST_DISCORD_TOKEN = originalToken;
+  }
+});
+
 test("golden flow: command and interactive handlers cover dashboard actions", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "extra-policy-command-"));
   const statePath = path.join(root, "policy-state.json");

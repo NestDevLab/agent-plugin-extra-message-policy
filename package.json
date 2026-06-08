@@ -10,7 +10,7 @@
     ]
   },
   "scripts": {
-    "build": "node --check index.js && node --check plugin-runtime.js && node --check policy.js && node --check policy-command.js && node --check native-reply.js && node --check raw-recall.js && node --check runtime-context.js",
+    "build": "node --check index.js && node --check plugin-runtime.js && node --check policy.js && node --check policy-audit.js && node --check policy-command.js && node --check native-reply.js && node --check raw-recall.js && node --check runtime-context.js",
     "test": "node --test",
     "test:coverage": "node --test --experimental-test-coverage",
     "lint": "npm run build"
@@ -33,6 +33,7 @@
     "index.js",
     "plugin-runtime.js",
     "policy.js",
+    "policy-audit.js",
     "policy-command.js",
     "native-reply.js",
     "raw-recall.js",
@@ -58,6 +59,7 @@
   "exports": {
     ".": "./index.js",
     "./policy": "./policy.js",
+    "./policy-audit": "./policy-audit.js",
     "./policy-command": "./policy-command.js",
     "./native-reply": "./native-reply.js",
     "./raw-recall": "./raw-recall.js",

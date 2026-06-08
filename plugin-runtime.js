@@ -21,6 +21,7 @@ import {
   validateRuntimeResponseAction
 } from "./policy-command.js";
 import { buildRawRecallGuidance, createRawContextSearchTool, searchRawRecall } from "./raw-recall.js";
+import { createPolicyAuditTool } from "./policy-audit.js";
 import {
   forceMentionedDispatchContext,
   rememberMentionFact,
@@ -492,6 +493,7 @@ export function registerExtraMessagePolicy(api, options = {}) {
   }
 
   api.registerTool?.((toolCtx) => createRawContextSearchTool(cfg.rawRecall, toolCtx), { name: "search_raw_context", optional: true });
+  api.registerTool?.((toolCtx) => createPolicyAuditTool(api, cfg, toolCtx), { name: "list_extra_message_policies", optional: true });
 
   api.on("before_agent_start", async (event, ctx) => {
     const appendSystemContext = buildRawRecallGuidance(cfg.rawRecall);
