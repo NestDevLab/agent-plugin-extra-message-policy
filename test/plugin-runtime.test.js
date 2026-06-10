@@ -128,6 +128,161 @@ test("golden flow: child Discord thread overrides suppressed parent policy", asy
   assert.equal(rows[0].policy.matched, "channelId:thread-42");
 });
 
+test("golden flow: child Discord thread inherits parent policy from thread_parent_id metadata", async () => {
+  const jsonlPath = path.join(os.tmpdir(), `extra-policy-${Date.now()}-thread-parent-alias.jsonl`);
+  const harness = await createHarness({
+    defaultPolicy: { respond: false, ingestMode: "none" },
+    policies: [
+      { channelId: "staff-parent", guildId: "guild-1", accountId: "default", respond: true, ingestMode: "all" }
+    ],
+    jsonlSink: { enabled: true, path: jsonlPath }
+  });
+
+  const event = {
+    messageId: "msg-parent-alias",
+    content: "mentioned in a dynamic thread",
+    metadata: {
+      guild_id: "guild-1",
+      channel_id: "thread-dynamic",
+      thread_parent_id: "staff-parent"
+    },
+    timestamp: Date.now()
+  };
+  const ctx = {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "thread-dynamic",
+    conversationId: "channel:thread-dynamic",
+    sessionKey: "agent:yehonal-staff:discord:channel:thread-dynamic",
+    senderId: "user-1",
+    messageId: "msg-parent-alias"
+  };
+
+  await harness.emit("message_received", event, ctx);
+  const dispatch = await harness.emit("before_dispatch", event, ctx);
+  const outbound = await harness.emit("message_sending", { content: "reply" }, ctx);
+
+  assert.equal(dispatch, undefined);
+  assert.deepEqual(outbound, { replyTo: "msg-parent-alias" });
+
+  const rows = await readJsonl(jsonlPath);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].policy.respond, true);
+  assert.equal(rows[0].policy.matched, "channelId:staff-parent,guildId:guild-1,accountId:default");
+});
+
+test("golden flow: child Discord thread inherits parent policy from core parent session key", async () => {
+  const jsonlPath = path.join(os.tmpdir(), `extra-policy-${Date.now()}-thread-parent-session.jsonl`);
+  const harness = await createHarness({
+    defaultPolicy: { respond: false, ingestMode: "none" },
+    policies: [
+      { channelId: "1497843035126632548", guildId: "843190729793863690", accountId: "default", respond: true, ingestMode: "all" }
+    ],
+    jsonlSink: { enabled: true, path: jsonlPath }
+  });
+
+  const event = {
+    messageId: "1513617888198656233",
+    content: "@Bot_Yehonal ping",
+    timestamp: Date.now()
+  };
+  const ctx = {
+    AccountId: "default",
+    GroupSpace: "843190729793863690",
+    NativeChannelId: "1513608425458761849",
+    OriginatingTo: "channel:1513608425458761849",
+    SessionKey: "agent:yehonal-staff:discord:channel:1513608425458761849",
+    ParentSessionKey: "agent:yehonal-staff:discord:channel:1497843035126632548",
+    ModelParentSessionKey: "agent:yehonal-staff:discord:channel:1497843035126632548",
+    SenderId: "108617457836539904",
+    MessageSid: "1513617888198656233"
+  };
+
+  await harness.emit("message_received", event, ctx);
+  const dispatch = await harness.emit("before_dispatch", event, ctx);
+
+  assert.equal(dispatch, undefined);
+
+  const rows = await readJsonl(jsonlPath);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].policy.respond, true);
+  assert.equal(rows[0].policy.matched, "channelId:1497843035126632548,guildId:843190729793863690,accountId:default");
+});
+
+test("golden flow: Discord thread hydrates missing parent channel before policy resolution", async () => {
+  const jsonlPath = path.join(os.tmpdir(), `extra-policy-${Date.now()}-thread-parent-hydrate.jsonl`);
+  const previousFetch = globalThis.fetch;
+  let fetchCount = 0;
+  globalThis.fetch = async (url) => {
+    fetchCount += 1;
+    assert.equal(String(url), "https://discord.com/api/v10/channels/1513905282139295744");
+    return {
+      ok: true,
+      async json() {
+        return {
+          id: "1513905282139295744",
+          type: 11,
+          guild_id: "843190729793863690",
+          parent_id: "1497843035126632548"
+        };
+      }
+    };
+  };
+
+  try {
+    const harness = await createHarness({
+      defaultPolicy: { respond: false, ingestMode: "none" },
+      policies: [
+        { channelId: "1497843035126632548", guildId: "843190729793863690", accountId: "default", respond: true, ingestMode: "all" }
+      ],
+      jsonlSink: { enabled: true, path: jsonlPath }
+    }, {
+      channels: {
+        discord: {
+          accounts: {
+            default: {
+              token: "fake-token"
+            }
+          }
+        }
+      }
+    });
+
+    const event = {
+      messageId: "1513905295154217092",
+      content: "<@1497722008740434000> Following up",
+      metadata: {
+        provider: "discord",
+        guildId: "843190729793863690",
+        channelId: "1513905282139295744"
+      },
+      timestamp: Date.now()
+    };
+    const ctx = {
+      accountId: "default",
+      guildId: "843190729793863690",
+      channelId: "1513905282139295744",
+      conversationId: "channel:1513905282139295744",
+      sessionKey: "agent:yehonal-staff:discord:channel:1513905282139295744",
+      senderId: "251803844307189761",
+      messageId: "1513905295154217092"
+    };
+
+    await harness.emit("message_received", event, ctx);
+    const dispatch = await harness.emit("before_dispatch", event, ctx);
+
+    assert.equal(dispatch, undefined);
+    assert.equal(fetchCount, 1);
+
+    const rows = await readJsonl(jsonlPath);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].policy.respond, true);
+    assert.equal(rows[0].policy.matched, "channelId:1497843035126632548,guildId:843190729793863690,accountId:default");
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
 test("golden flow: Telegram policy matches chat aliases and suppresses reply end-to-end", async () => {
   const jsonlPath = path.join(os.tmpdir(), `extra-policy-${Date.now()}-telegram.jsonl`);
   const harness = await createHarness({

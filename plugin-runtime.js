@@ -29,6 +29,8 @@ import {
 } from "./runtime-context.js";
 import { applyNativeReplyHandling, normalizeNativeReplyHandling } from "./native-reply.js";
 
+const DISCORD_API = "https://discord.com/api/v10";
+
 function eventMessageId(event = {}, ctx = {}) {
   return String(event.messageId ?? event.MessageId ?? ctx.messageId ?? ctx.MessageId ?? "");
 }
@@ -43,6 +45,13 @@ function textValue(...values) {
 
 function stripConversationPrefix(value) {
   return String(value || "").trim().replace(/^(channel|chat|user):/, "");
+}
+
+function channelIdFromSessionKey(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const match = text.match(/(?:^|:)channel:(\d+)(?:$|:)/);
+  return match?.[1] || "";
 }
 
 function routeChannelId(event = {}, ctx = {}) {
@@ -75,19 +84,53 @@ function routeParentChannelId(event = {}, ctx = {}) {
     ctx.parentChannelId,
     ctx.ParentId,
     ctx.parentId,
+    ctx.ThreadParentId,
+    ctx.threadParentId,
+    ctx.thread_parent_id,
     event.NativeParentChannelId,
     event.ParentChannelId,
     event.parentChannelId,
     event.ParentId,
     event.parentId,
+    event.ThreadParentId,
+    event.threadParentId,
+    event.thread_parent_id,
     event.metadata?.parentChannelId,
     event.metadata?.parent_channel_id,
     event.metadata?.parentId,
     event.metadata?.parent_id,
+    event.metadata?.threadParentId,
+    event.metadata?.thread_parent_id,
     ctx.metadata?.parentChannelId,
     ctx.metadata?.parent_channel_id,
     ctx.metadata?.parentId,
-    ctx.metadata?.parent_id
+    ctx.metadata?.parent_id,
+    ctx.metadata?.threadParentId,
+    ctx.metadata?.thread_parent_id,
+    channelIdFromSessionKey(ctx.ParentSessionKey),
+    channelIdFromSessionKey(ctx.parentSessionKey),
+    channelIdFromSessionKey(ctx.ModelParentSessionKey),
+    channelIdFromSessionKey(ctx.modelParentSessionKey),
+    channelIdFromSessionKey(ctx.route?.parentSessionKey),
+    channelIdFromSessionKey(ctx.route?.modelParentSessionKey),
+    channelIdFromSessionKey(event.ParentSessionKey),
+    channelIdFromSessionKey(event.parentSessionKey),
+    channelIdFromSessionKey(event.ModelParentSessionKey),
+    channelIdFromSessionKey(event.modelParentSessionKey),
+    channelIdFromSessionKey(event.route?.parentSessionKey),
+    channelIdFromSessionKey(event.route?.modelParentSessionKey),
+    channelIdFromSessionKey(event.metadata?.ParentSessionKey),
+    channelIdFromSessionKey(event.metadata?.parentSessionKey),
+    channelIdFromSessionKey(event.metadata?.parent_session_key),
+    channelIdFromSessionKey(event.metadata?.ModelParentSessionKey),
+    channelIdFromSessionKey(event.metadata?.modelParentSessionKey),
+    channelIdFromSessionKey(event.metadata?.model_parent_session_key),
+    channelIdFromSessionKey(ctx.metadata?.ParentSessionKey),
+    channelIdFromSessionKey(ctx.metadata?.parentSessionKey),
+    channelIdFromSessionKey(ctx.metadata?.parent_session_key),
+    channelIdFromSessionKey(ctx.metadata?.ModelParentSessionKey),
+    channelIdFromSessionKey(ctx.metadata?.modelParentSessionKey),
+    channelIdFromSessionKey(ctx.metadata?.model_parent_session_key)
   ));
 }
 
@@ -134,6 +177,111 @@ function routeSessionKey(event = {}, ctx = {}) {
     ctx.metadata?.sessionKey,
     ctx.metadata?.session_key
   );
+}
+
+function isDiscordRoute(event = {}, ctx = {}) {
+  return routeSessionKey(event, ctx).includes(":discord:")
+    || textValue(ctx.provider, event.provider, ctx.metadata?.provider, event.metadata?.provider) === "discord"
+    || Boolean(routeGuildId(event, ctx));
+}
+
+function looksLikeDiscordSnowflake(value) {
+  return /^\d{16,22}$/.test(String(value || ""));
+}
+
+function discordAccountConfig(openclawConfig = {}, accountId = "") {
+  return openclawConfig?.channels?.discord?.accounts?.[accountId] || null;
+}
+
+function discordTokenForAccount(openclawConfig = {}, accountId = "") {
+  const account = discordAccountConfig(openclawConfig, accountId);
+  const token = account?.token || openclawConfig?.channels?.discord?.token;
+  if (typeof token === "string") return token;
+  if (token && typeof token === "object") {
+    if (token.source === "env" && token.id) return process.env[token.id] || "";
+    if (typeof token.value === "string") return token.value;
+  }
+  return "";
+}
+
+async function fetchDiscordChannelParent(channelId, token) {
+  if (typeof fetch !== "function" || !token || !looksLikeDiscordSnowflake(channelId)) return null;
+  const res = await fetch(`${DISCORD_API}/channels/${encodeURIComponent(channelId)}`, {
+    headers: { authorization: `Bot ${token}` }
+  });
+  if (!res.ok) return null;
+  const json = await res.json().catch(() => null);
+  if (!json || typeof json !== "object") return null;
+  return {
+    channelId: textValue(json.id),
+    parentChannelId: textValue(json.parent_id),
+    guildId: textValue(json.guild_id)
+  };
+}
+
+async function withHydratedDiscordParent(state, event = {}, ctx = {}, currentConfig = {}, logger = null) {
+  const channelId = routeChannelId(event, ctx);
+  if (!isDiscordRoute(event, ctx) || !looksLikeDiscordSnowflake(channelId) || routeParentChannelId(event, ctx)) {
+    return { event, ctx };
+  }
+
+  const cached = state.discordChannelParents.get(channelId);
+  let hydrated = cached || null;
+  if (!hydrated) {
+    const accountId = routeAccountId(event, ctx) || "default";
+    const token = discordTokenForAccount(currentConfig, accountId);
+    try {
+      hydrated = await fetchDiscordChannelParent(channelId, token);
+    } catch (err) {
+      logger?.warn?.(`extra-message-policy: Discord parent lookup failed for ${channelId}: ${String(err)}`);
+      hydrated = null;
+    }
+    state.discordChannelParents.set(channelId, hydrated || { channelId, parentChannelId: "", guildId: "" });
+    while (state.discordChannelParents.size > 5000) {
+      const oldest = state.discordChannelParents.keys().next().value;
+      state.discordChannelParents.delete(oldest);
+    }
+  }
+
+  if (!hydrated?.parentChannelId) return { event, ctx };
+
+  const guildId = routeGuildId(event, ctx) || hydrated.guildId;
+  const metadata = {
+    ...(ctx.metadata || {}),
+    guildId,
+    rawGuildId: guildId,
+    channelId,
+    parentChannelId: hydrated.parentChannelId,
+    threadParentId: hydrated.parentChannelId,
+    thread_parent_id: hydrated.parentChannelId
+  };
+  return {
+    event: {
+      ...event,
+      guildId: event.guildId || guildId,
+      rawGuildId: event.rawGuildId || guildId,
+      parentChannelId: event.parentChannelId || hydrated.parentChannelId,
+      threadParentId: event.threadParentId || hydrated.parentChannelId,
+      metadata: {
+        ...(event.metadata || {}),
+        guildId,
+        rawGuildId: guildId,
+        channelId,
+        parentChannelId: hydrated.parentChannelId,
+        threadParentId: hydrated.parentChannelId,
+        thread_parent_id: hydrated.parentChannelId
+      }
+    },
+    ctx: {
+      ...ctx,
+      guildId: ctx.guildId || guildId,
+      rawGuildId: ctx.rawGuildId || guildId,
+      GroupSpace: ctx.GroupSpace || guildId,
+      parentChannelId: ctx.parentChannelId || hydrated.parentChannelId,
+      threadParentId: ctx.threadParentId || hydrated.parentChannelId,
+      metadata
+    }
+  };
 }
 
 function rememberDiscordRoute(state, event = {}, ctx = {}) {
@@ -485,14 +633,19 @@ function dashboardReply(view, ctx = {}, discordSdk = {}) {
   };
 }
 
+function dispatchParentChannelId(ctx = {}) {
+  return ctx.NativeParentChannelId || ctx.ParentChannelId || ctx.parentChannelId || ctx.ParentId || ctx.parentId || ctx.ThreadParentId || ctx.threadParentId || ctx.thread_parent_id || ctx.metadata?.parentChannelId || ctx.metadata?.parent_channel_id || ctx.metadata?.parentId || ctx.metadata?.parent_id || ctx.metadata?.threadParentId || ctx.metadata?.thread_parent_id;
+}
+
 function dispatchPolicyContext(ctx = {}) {
-  const parentChannelId = ctx.NativeParentChannelId || ctx.ParentChannelId || ctx.parentChannelId || ctx.ParentId || ctx.parentId;
+  const parentChannelId = dispatchParentChannelId(ctx);
   return {
     accountId: ctx.AccountId || ctx.accountId,
     guildId: ctx.GroupSpace || ctx.guildId || ctx.rawGuildId,
     rawGuildId: ctx.GroupSpace || ctx.rawGuildId || ctx.guildId,
     channelId: ctx.NativeChannelId || ctx.ChannelId || ctx.channelId,
     parentChannelId,
+    threadParentId: parentChannelId,
     conversationId: ctx.OriginatingTo || ctx.To || ctx.conversationId,
     sessionKey: ctx.SessionKey || ctx.sessionKey,
     senderId: ctx.SenderId || ctx.senderId,
@@ -502,13 +655,15 @@ function dispatchPolicyContext(ctx = {}) {
       guildId: ctx.GroupSpace || ctx.guildId,
       channelId: ctx.NativeChannelId || ctx.ChannelId || ctx.channelId,
       parentChannelId,
+      threadParentId: parentChannelId,
+      thread_parent_id: parentChannelId,
       to: ctx.OriginatingTo || ctx.To
     }
   };
 }
 
 function dispatchPolicyEvent(ctx = {}) {
-  const parentChannelId = ctx.NativeParentChannelId || ctx.ParentChannelId || ctx.parentChannelId || ctx.ParentId || ctx.parentId;
+  const parentChannelId = dispatchParentChannelId(ctx);
   return {
     content: ctx.BodyForAgent || ctx.Body || ctx.content,
     body: ctx.BodyForAgent || ctx.Body || ctx.body,
@@ -516,6 +671,7 @@ function dispatchPolicyEvent(ctx = {}) {
     guildId: ctx.GroupSpace,
     channelId: ctx.NativeChannelId || ctx.ChannelId,
     parentChannelId,
+    threadParentId: parentChannelId,
     conversationId: ctx.OriginatingTo || ctx.To,
     sessionKey: ctx.SessionKey,
     senderId: ctx.SenderId,
@@ -525,6 +681,8 @@ function dispatchPolicyEvent(ctx = {}) {
       guildId: ctx.GroupSpace,
       channelId: ctx.NativeChannelId || ctx.ChannelId,
       parentChannelId,
+      threadParentId: parentChannelId,
+      thread_parent_id: parentChannelId,
       to: ctx.OriginatingTo || ctx.To
     }
   };
@@ -552,19 +710,22 @@ export function registerExtraMessagePolicy(api, options = {}) {
     seen: new Map(),
     responsePolicy: new Map(),
     mentionFacts: new Map(),
-    discordRoutes: new Map()
+    discordRoutes: new Map(),
+    discordChannelParents: new Map()
   };
 
   const resolveEffectivePolicy = async (event = {}, ctx = {}) => {
     const routed = withRememberedDiscordRoute(state, event, ctx);
+    const currentConfig = api.runtime?.config?.current?.() || api.config || {};
+    const hydrated = await withHydratedDiscordParent(state, routed.event, routed.ctx, currentConfig, api.logger);
+    if (hydrated !== routed) rememberDiscordRoute(state, hydrated.event, hydrated.ctx);
     const enriched = withDerivedMentionFact(
       state,
-      routed.event,
-      routed.ctx,
-      api.runtime?.config?.current?.() || api.config || {},
+      hydrated.event,
+      hydrated.ctx,
+      currentConfig,
       api.pluginConfig || {}
     );
-    const currentConfig = api.runtime?.config?.current?.() || api.config || {};
     const basePolicy = resolvePolicy(cfg, enriched.event, enriched.ctx);
     const runtimeState = await loadPolicyState(policyStatePath);
     const runtimeOverride = resolveRuntimePolicyOverride(commandConfig, runtimeState, enriched.event, enriched.ctx);
