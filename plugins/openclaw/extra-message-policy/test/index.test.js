@@ -42,7 +42,7 @@ test("native reply handling adds Discord replyTo from dispatch context", () => {
 
 test("native reply handling accepts Discord guild context without Discord session key", () => {
   const result = applyNativeReplyHandling({}, {
-    sessionKey: "agent:main:tirrenia-runtime",
+    sessionKey: "agent:main:exampleorg-runtime",
     guildId: "guild-1",
     trigger: { messageId: "source-message-1" }
   }, normalizeNativeReplyHandling());

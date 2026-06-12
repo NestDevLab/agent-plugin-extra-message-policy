@@ -1,3 +1,5 @@
 node_modules/
-*.log
-runtime/
+.agentwheel/cache/
+.agentwheel/lock.json
+*.pyc
+__pycache__/

@@ -1,0 +1,73 @@
+{
+  "name": "@nestdevlab/openclaw-plugin-extra-message-policy",
+  "version": "0.1.3",
+  "private": false,
+  "type": "module",
+  "description": "OpenClaw plugin for cross-platform message ingest, response policy, and zero-embedding raw recall.",
+  "openclaw": {
+    "extensions": [
+      "./index.js"
+    ]
+  },
+  "scripts": {
+    "build": "node --check index.js && node --check plugin-runtime.js && node --check policy.js && node --check policy-audit.js && node --check policy-command.js && node --check native-reply.js && node --check raw-recall.js && node --check runtime-context.js",
+    "test": "node --test",
+    "test:coverage": "node --test --experimental-test-coverage",
+    "lint": "npm run build"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.3.24-beta.2"
+  },
+  "homepage": "https://github.com/NestDevLab/openclaw-plugin-extra-message-policy#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NestDevLab/openclaw-plugin-extra-message-policy.git"
+  },
+  "bugs": {
+    "url": "https://github.com/NestDevLab/openclaw-plugin-extra-message-policy/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "index.js",
+    "plugin-runtime.js",
+    "policy.js",
+    "policy-audit.js",
+    "policy-command.js",
+    "native-reply.js",
+    "raw-recall.js",
+    "runtime-context.js",
+    "openclaw.plugin.json",
+    "README.md",
+    "ROLLOUT.md",
+    "examples",
+    "LICENSE"
+  ],
+  "keywords": [
+    "openclaw",
+    "plugin",
+    "message-policy",
+    "discord",
+    "telegram",
+    "ingest",
+    "raw-recall"
+  ],
+  "author": "NestDevLab",
+  "license": "MIT",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./policy": "./policy.js",
+    "./policy-audit": "./policy-audit.js",
+    "./policy-command": "./policy-command.js",
+    "./native-reply": "./native-reply.js",
+    "./raw-recall": "./raw-recall.js",
+    "./runtime-context": "./runtime-context.js"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  }
+}

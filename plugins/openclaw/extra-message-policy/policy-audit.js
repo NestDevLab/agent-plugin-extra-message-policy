@@ -254,7 +254,7 @@ export function createPolicyAuditTool(api, pluginConfig, toolCtx = {}, options =
       properties: {
         accountId: {
           type: "string",
-          description: "Discord account id configured in OpenClaw, for example chromiecraft-bot. Defaults to default."
+          description: "Discord account id configured in OpenClaw, for example community-bot. Defaults to default."
         },
         guildId: {
           type: "string",

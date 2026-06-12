@@ -670,7 +670,7 @@ test("native disabled channel suppresses runtime always reply", () => {
   const effective = applyNativeMentionGatePolicy(runtimePolicy, {
     enabled: false,
     status: "off",
-    source: "channels.discord.accounts.chromiecraft-bot.guilds.788063059926712341.channels.123.enabled"
+    source: "channels.discord.accounts.community-bot.guilds.788063059926712341.channels.123.enabled"
   }, { wasMentioned: true }, ctx);
 
   assert.equal(effective.respond, false);
@@ -904,7 +904,7 @@ test("native enabled status treats disabled wildcard as hard off unless channel 
     channels: {
       discord: {
         accounts: {
-          "chromiecraft-bot": {
+          "community-bot": {
             guilds: {
               "788063059926712341": {
                 channels: {
@@ -920,13 +920,13 @@ test("native enabled status treats disabled wildcard as hard off unless channel 
   };
 
   const blocked = resolveNativeRequireMentionStatus({
-    accountId: "chromiecraft-bot",
+    accountId: "community-bot",
     guildId: "788063059926712341",
     channelId: "other",
     provider: "discord"
   }, cfg);
   const allowed = resolveNativeRequireMentionStatus({
-    accountId: "chromiecraft-bot",
+    accountId: "community-bot",
     guildId: "788063059926712341",
     channelId: "allowed",
     provider: "discord"
