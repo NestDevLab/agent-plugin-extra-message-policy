@@ -54,27 +54,50 @@ function channelIdFromSessionKey(value) {
   return match?.[1] || "";
 }
 
+function firstDiscordChannelId(...values) {
+  const candidates = values
+    .map((value) => stripConversationPrefix(String(value ?? "").trim()))
+    .filter(Boolean);
+  return candidates.find(looksLikeDiscordSnowflake) || candidates[0] || "";
+}
+
 function routeChannelId(event = {}, ctx = {}) {
-  return stripConversationPrefix(textValue(
+  return firstDiscordChannelId(
     ctx.NativeChannelId,
     ctx.ChannelId,
     ctx.channelId,
+    ctx.threadId,
+    ctx.ThreadId,
     ctx.conversationId,
     ctx.OriginatingTo,
     ctx.To,
     event.NativeChannelId,
     event.ChannelId,
     event.channelId,
+    event.threadId,
+    event.ThreadId,
     event.conversationId,
     event.OriginatingTo,
     event.To,
     event.metadata?.channelId,
     event.metadata?.channel_id,
+    event.metadata?.threadId,
+    event.metadata?.thread_id,
     event.metadata?.to,
     ctx.metadata?.channelId,
     ctx.metadata?.channel_id,
-    ctx.metadata?.to
-  ));
+    ctx.metadata?.threadId,
+    ctx.metadata?.thread_id,
+    ctx.metadata?.to,
+    channelIdFromSessionKey(ctx.SessionKey),
+    channelIdFromSessionKey(ctx.sessionKey),
+    channelIdFromSessionKey(event.SessionKey),
+    channelIdFromSessionKey(event.sessionKey),
+    channelIdFromSessionKey(ctx.metadata?.sessionKey),
+    channelIdFromSessionKey(ctx.metadata?.session_key),
+    channelIdFromSessionKey(event.metadata?.sessionKey),
+    channelIdFromSessionKey(event.metadata?.session_key)
+  );
 }
 
 function routeParentChannelId(event = {}, ctx = {}) {
