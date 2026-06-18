@@ -221,7 +221,6 @@ function discordTokenForAccount(openclawConfig = {}, accountId = "") {
   const token = account?.token || openclawConfig?.channels?.discord?.token;
   if (typeof token === "string") return token;
   if (token && typeof token === "object") {
-    if (token.source === "env" && token.id) return process.env[token.id] || "";
     if (typeof token.value === "string") return token.value;
   }
   return "";

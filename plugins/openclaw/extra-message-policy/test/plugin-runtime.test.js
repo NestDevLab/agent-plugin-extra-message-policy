@@ -1257,8 +1257,6 @@ test("golden flow: startup raw recall and registered search tool handle success 
 
 test("policy audit tool lists accessible Discord channels with effective policy", async () => {
   const originalFetch = globalThis.fetch;
-  const originalToken = process.env.TEST_DISCORD_TOKEN;
-  process.env.TEST_DISCORD_TOKEN = "test-token";
   globalThis.fetch = async (url) => {
     const textUrl = String(url);
     if (textUrl.endsWith("/guilds/788063059926712341/channels")) {
@@ -1325,7 +1323,7 @@ test("policy audit tool lists accessible Discord channels with effective policy"
           accounts: {
             "community-bot": {
               enabled: true,
-              token: { source: "env", id: "TEST_DISCORD_TOKEN" },
+              token: { value: "test-token" },
               guilds: {
                 "788063059926712341": {
                   channels: {
@@ -1376,8 +1374,6 @@ test("policy audit tool lists accessible Discord channels with effective policy"
     assert.equal(crossGuild, undefined);
   } finally {
     globalThis.fetch = originalFetch;
-    if (originalToken === undefined) delete process.env.TEST_DISCORD_TOKEN;
-    else process.env.TEST_DISCORD_TOKEN = originalToken;
   }
 });
 
