@@ -51,12 +51,16 @@ export function normalizeIngestMode(value, fallback = DEFAULT_POLICY.ingestMode)
 }
 
 export function normalizePolicy(raw = {}, fallback = DEFAULT_POLICY) {
-  const requireMention = asBool(raw.requireMention, fallback.requireMention === true);
-  return {
+  const policy = {
     respond: asBool(raw.respond, fallback.respond),
-    ingestMode: normalizeIngestMode(raw.ingestMode, fallback.ingestMode),
-    ...(requireMention ? { requireMention: true } : {})
+    ingestMode: normalizeIngestMode(raw.ingestMode, fallback.ingestMode)
   };
+  if (typeof raw.requireMention === "boolean") {
+    policy.requireMention = raw.requireMention;
+  } else if (fallback.requireMention === true) {
+    policy.requireMention = true;
+  }
+  return policy;
 }
 
 export function normalizePolicyRule(raw = {}, defaultPolicy = DEFAULT_POLICY) {
@@ -371,7 +375,7 @@ export function resolvePolicy(cfg, event = {}, ctx = {}) {
     return withMentionDecision({
       respond: bestRule.respond,
       ingestMode: bestRule.ingestMode,
-      ...(bestRule.requireMention ? { requireMention: true } : {}),
+      ...(Object.prototype.hasOwnProperty.call(bestRule, "requireMention") ? { requireMention: bestRule.requireMention } : {}),
       ...(bestRule.mentionTextRegex ? { mentionTextRegex: bestRule.mentionTextRegex } : {}),
       matched: describeRule(bestRule)
     }, event, ctx);

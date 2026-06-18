@@ -192,7 +192,7 @@ test("effective response policy matrix respects config, runtime, native gate, an
             const responseOff = runtimeMode === "off";
             const mentionRequired = !responseOff && (
               runtimeMode === "mention"
-              || (!runtimeMode && (baseRequireMention || nativeMode === "on"))
+              || (!runtimeMode && baseRequireMention)
               || (runtimeMode !== "always" && baseRequireMention)
             );
             const expectedRespond = responseOff ? false : mentionRequired ? mentioned : true;

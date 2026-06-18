@@ -527,6 +527,7 @@ export function applyNativeMentionGatePolicy(policy = {}, nativeStatus = {}, eve
   }
   if (policy.runtimeResponseMode) return policy;
   if (policy.matched && policy.matched !== "default") return policy;
+  if (Object.prototype.hasOwnProperty.call(policy, "requireMention")) return policy;
   if (nativeStatus?.status !== "on" || policy.requireMention === true) return policy;
   const merged = {
     ...policy,
