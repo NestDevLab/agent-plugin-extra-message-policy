@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { wasMentioned } from "./policy.js";
 
-const RESPONSE_MODES = Object.freeze(["off", "mention", "always"]);
+const RESPONSE_MODES = Object.freeze(["off", "mention", "firstTag", "always"]);
 const RUNTIME_INGEST_MODES = Object.freeze(["off", "passive", "responseCandidates", "all"]);
 const DASHBOARD_NAMESPACE = "policy";
 
@@ -160,7 +160,10 @@ function platformFromContext(event = {}, ctx = {}) {
 }
 
 function normalizeResponseMode(value, fallback = DEFAULT_RUNTIME_POLICY.responseMode) {
-  return RESPONSE_MODES.includes(value) ? value : fallback;
+  if (RESPONSE_MODES.includes(value)) return value;
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "firsttag" || normalized === "first-tag" || normalized === "first_tag") return "firstTag";
+  return RESPONSE_MODES.includes(normalized) ? normalized : fallback;
 }
 
 function normalizeRuntimeIngestMode(value, fallback = DEFAULT_RUNTIME_POLICY.ingestMode) {
@@ -465,7 +468,7 @@ function runtimeToBasePolicy(runtimePolicy) {
   const ingestMode = normalizeRuntimeIngestMode(runtimePolicy.ingestMode);
   return {
     respond: responseMode !== "off",
-    requireMention: responseMode === "mention",
+    requireMention: responseMode === "mention" || responseMode === "firstTag",
     ingestMode: ingestMode === "off" ? "none" : ingestMode,
     runtimeResponseMode: responseMode,
     runtimeIngestMode: ingestMode
@@ -640,7 +643,7 @@ export function renderPolicyStatus(policy, scope) {
 export function renderPolicyHelp(commandName = "policy") {
   return [
     `Usage: /${commandName} status`,
-    `/${commandName} response off|mention|always|toggle`,
+    `/${commandName} response off|mention|firstTag|always|toggle`,
     `/${commandName} ingest off|passive|responseCandidates|all|toggle`,
     `/${commandName} native on|off`,
     `/${commandName} reset`
@@ -968,6 +971,7 @@ function renderReplyMode(value) {
   switch (value) {
     case "off": return "Off";
     case "mention": return "Mention only";
+    case "firstTag": return "First tag";
     case "always": return "Always reply";
     default: return "Unknown";
   }
@@ -1102,6 +1106,7 @@ export function buildPolicyDashboardView({ effectivePolicy, runtimeOverride, sco
   const responseButtons = [
     makeButton({ label: "Replies off", action: "response", value: "off", style: selectedStyle(responseMode === "off") }),
     makeButton({ label: "Mention only", action: "response", value: "mention", style: selectedStyle(responseMode === "mention") }),
+    makeButton({ label: "First tag", action: "response", value: "firstTag", style: selectedStyle(responseMode === "firstTag") }),
     makeButton({ label: "Reply always", action: "response", value: "always", style: selectedStyle(responseMode === "always") })
   ];
   const ingestButtons = [
@@ -1154,7 +1159,7 @@ export function buildPolicyDashboardView({ effectivePolicy, runtimeOverride, sco
     "",
     "**Controls**",
     accountButtons.length ? "- Account: first button row." : "- Account: only one account is available.",
-    "- Reply policy: Replies off / Mention only / Reply always.",
+    "- Reply policy: Replies off / Mention only / First tag / Reply always.",
     "- Read policy: Read off / Passive / Candidates / All messages.",
     "- Native gate: turn OpenClaw requireMention on or off.",
     "- Panel: Reset panel / Refresh / Details / Dismiss.",

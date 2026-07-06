@@ -1454,6 +1454,55 @@ test("golden flow: command and interactive handlers cover dashboard actions", as
   assert.match(edits.at(-1).text, /dismissed/);
 });
 
+test("golden flow: firstTag promotes exact thread scope to reply always", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "extra-policy-first-tag-"));
+  const statePath = path.join(root, "policy-state.json");
+  const harness = await createHarness({
+    policyCommand: { statePath },
+    defaultPolicy: { respond: true, ingestMode: "all" }
+  });
+  const ctx = {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "thread-1",
+    parentChannelId: "parent-1",
+    conversationId: "channel:thread-1",
+    senderId: "operator",
+    sessionKey: "agent:main:discord:channel:thread-1"
+  };
+
+  await harness.commands[0].handler({ ...ctx, args: "response firstTag" });
+  let state = JSON.parse(await readFile(statePath, "utf8"));
+  assert.equal(state.scopes["discord:default:guild-1:thread-1"].policy.responseMode, "firstTag");
+
+  const plainDispatch = await harness.emit("before_dispatch", {
+    messageId: "msg-first-tag-plain",
+    content: "not addressed",
+    wasMentioned: false
+  }, { ...ctx, messageId: "msg-first-tag-plain", wasMentioned: false });
+  state = JSON.parse(await readFile(statePath, "utf8"));
+  assert.deepEqual(plainDispatch, { handled: true });
+  assert.equal(state.scopes["discord:default:guild-1:thread-1"].policy.responseMode, "firstTag");
+
+  const mentionedDispatch = await harness.emit("before_dispatch", {
+    messageId: "msg-first-tag-mentioned",
+    content: "hey bot",
+    wasMentioned: true
+  }, { ...ctx, messageId: "msg-first-tag-mentioned", wasMentioned: true });
+  state = JSON.parse(await readFile(statePath, "utf8"));
+  assert.equal(mentionedDispatch, undefined);
+  assert.equal(state.scopes["discord:default:guild-1:thread-1"].policy.responseMode, "always");
+  assert.equal(state.scopes["discord:default:guild-1:parent-1"], undefined);
+  assert.ok(harness.logs.some((entry) => entry.message.includes("first tag promoted discord:default:guild-1:thread-1")));
+
+  const unlockedDispatch = await harness.emit("before_dispatch", {
+    messageId: "msg-first-tag-unlocked",
+    content: "free response",
+    wasMentioned: false
+  }, { ...ctx, messageId: "msg-first-tag-unlocked", wasMentioned: false });
+  assert.equal(unlockedDispatch, undefined);
+});
+
 test("approval prompt handling covers persisted strings, arrays, text fields, cancel mode, and non-prompts", async () => {
   const replaceHarness = await createHarness({
     approvalPromptHandling: {

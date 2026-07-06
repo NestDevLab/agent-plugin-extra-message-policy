@@ -79,6 +79,22 @@ test("runtime mention override suppresses unmentioned dispatches", () => {
   assert.equal(mentioned.mentionSatisfied, true);
 });
 
+test("runtime firstTag override waits for the first mention", () => {
+  const commandConfig = normalizePolicyCommandConfig({});
+  const result = applyRuntimeCommand(commandConfig, {}, {}, ctx, parsePolicyCommand("response first-tag"), "operator");
+  const override = resolveRuntimePolicyOverride(commandConfig, result.state, {}, ctx);
+  const unmentioned = applyRuntimePolicy({ respond: true, ingestMode: "all", matched: "config" }, override, { wasMentioned: false }, ctx);
+  const mentioned = applyRuntimePolicy({ respond: true, ingestMode: "all", matched: "config" }, override, { wasMentioned: true }, ctx);
+
+  assert.equal(result.policy.responseMode, "firstTag");
+  assert.equal(override.runtimeResponseMode, "firstTag");
+  assert.equal(unmentioned.respond, false);
+  assert.equal(unmentioned.requireMention, true);
+  assert.equal(unmentioned.mentionSatisfied, false);
+  assert.equal(mentioned.respond, true);
+  assert.equal(mentioned.mentionSatisfied, true);
+});
+
 test("fixed native mention gate applies when no dynamic policy exists", () => {
   const base = resolvePolicy(
     normalizeConfig({ defaultPolicy: { respond: true, ingestMode: "responseCandidates" } }),
@@ -145,7 +161,7 @@ test("explicit extra-message-policy response config overrides native mention gat
 });
 
 test("effective response policy matrix respects config, runtime, native gate, and mention state", async (t) => {
-  const runtimeModes = [null, "off", "mention", "always"];
+  const runtimeModes = [null, "off", "mention", "firstTag", "always"];
   const nativeModes = ["unset", "off", "on"];
   const baseRequireModes = [false, true];
   const mentionModes = [false, true];
@@ -174,7 +190,7 @@ test("effective response policy matrix respects config, runtime, native gate, an
             const runtimeOverride = runtimeMode
               ? {
                   respond: runtimeMode !== "off",
-                  requireMention: runtimeMode === "mention",
+                  requireMention: runtimeMode === "mention" || runtimeMode === "firstTag",
                   ingestMode: "all",
                   runtimeResponseMode: runtimeMode,
                   runtimeIngestMode: "all",
@@ -192,6 +208,7 @@ test("effective response policy matrix respects config, runtime, native gate, an
             const responseOff = runtimeMode === "off";
             const mentionRequired = !responseOff && (
               runtimeMode === "mention"
+              || runtimeMode === "firstTag"
               || (!runtimeMode && baseRequireMention)
               || (runtimeMode !== "always" && baseRequireMention)
             );
@@ -507,8 +524,10 @@ test("dashboard view exposes button callbacks for runtime and permanent policy",
   assert.equal(view.componentSpec.blocks.length, 4);
   const buttons = view.componentSpec.blocks.flatMap((block) => block.buttons);
   assert.ok(buttons.some((entry) => entry.callbackData.startsWith("policy:response:off:")));
+  assert.ok(buttons.some((entry) => entry.callbackData.startsWith("policy:response:firstTag:")));
   assert.ok(buttons.some((entry) => entry.callbackData.startsWith("policy:ingest:passive:")));
   assert.ok(buttons.some((entry) => entry.callbackData.startsWith("policy:native:on:")));
+  assert.ok(buttons.some((entry) => entry.label === "First tag"));
   assert.ok(buttons.some((entry) => entry.label === "Reply always"));
   assert.ok(buttons.some((entry) => entry.label === "Disable native gate"));
   assert.ok(buttons.every((entry) => entry.allowedUsers[0] === "operator"));
@@ -748,6 +767,7 @@ test("command parser covers aliases and unknown input", () => {
   assert.deepEqual(parsePolicyCommand("show"), { action: "status" });
   assert.deepEqual(parsePolicyCommand("clear"), { action: "reset" });
   assert.deepEqual(parsePolicyCommand("reply always"), { action: "set-response", value: "always" });
+  assert.deepEqual(parsePolicyCommand("reply first-tag"), { action: "set-response", value: "first-tag" });
   assert.deepEqual(parsePolicyCommand("respond off"), { action: "set-response", value: "off" });
   assert.deepEqual(parsePolicyCommand("read all"), { action: "set-ingest", value: "all" });
   assert.deepEqual(parsePolicyCommand("require-mention on"), { action: "set-native-require", value: "on" });
@@ -765,6 +785,7 @@ test("dashboard action parser covers every action and bad scopes", () => {
   });
   assert.deepEqual(parsePolicyDashboardAction("reset:_:"), { action: "reset", scope: null });
   assert.deepEqual(parsePolicyDashboardAction("response:mention:"), { action: "set-response", value: "mention", scope: null });
+  assert.deepEqual(parsePolicyDashboardAction("response:firstTag:"), { action: "set-response", value: "firsttag", scope: null });
   assert.deepEqual(parsePolicyDashboardAction("ingest:passive:"), { action: "set-ingest", value: "passive", scope: null });
   assert.deepEqual(parsePolicyDashboardAction("native:on:"), { action: "set-native-require", value: "on", scope: null });
   assert.deepEqual(parsePolicyDashboardAction("unknown:_:"), { action: "status", scope: null });

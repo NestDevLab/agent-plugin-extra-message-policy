@@ -73,13 +73,15 @@ The plugin exposes one central command, `/policy`, for runtime response and inge
 
 ```text
 /policy status
-/policy response off|mention|always|toggle
+/policy response off|mention|firstTag|always|toggle
 /policy ingest off|passive|responseCandidates|all|toggle
 /policy native on|off
 /policy reset
 ```
 
 The text subcommands remain available as a fallback, but the normal Discord workflow is button-driven: change runtime response, runtime ingest, permanent native mention config, refresh the panel, reset runtime overrides, or dismiss the panel without typing command arguments.
+
+`response firstTag` keeps the chat locked like `response mention` until the bot is mentioned once. On that first tag, the plugin automatically saves the current exact chat/thread scope as `response always`. It does not expire or auto-relock; use `/policy` to manually choose `Replies off`, `Mention only`, or `First tag` again.
 
 Runtime `response` and `ingest` subcommands write plugin state, not OpenClaw config. They should not force a gateway config reload or Discord reconnect.
 

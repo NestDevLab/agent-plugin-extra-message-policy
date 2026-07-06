@@ -288,6 +288,7 @@
             "enum": [
               "off",
               "mention",
+              "firstTag",
               "always"
             ],
             "default": "off"

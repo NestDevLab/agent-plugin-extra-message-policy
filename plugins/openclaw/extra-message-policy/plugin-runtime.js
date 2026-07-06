@@ -716,6 +716,15 @@ function shouldForceReplyContext(policy = {}) {
     && policy.requireMention !== true;
 }
 
+function shouldPromoteFirstTagPolicy(policy = {}) {
+  return policy.runtimeResponseMode === "firstTag"
+    && policy.mentionSatisfied === true;
+}
+
+function policyActor(event = {}, ctx = {}) {
+  return ctx.senderId || ctx.SenderId || event.senderId || event.SenderId || "";
+}
+
 export function registerExtraMessagePolicy(api, options = {}) {
   const cfg = normalizeConfig(api.pluginConfig || {});
   const commandConfig = normalizePolicyCommandConfig(api.pluginConfig || {});
@@ -750,8 +759,22 @@ export function registerExtraMessagePolicy(api, options = {}) {
     );
     const basePolicy = resolvePolicy(cfg, enriched.event, enriched.ctx);
     const runtimeState = await loadPolicyState(policyStatePath);
-    const runtimeOverride = resolveRuntimePolicyOverride(commandConfig, runtimeState, enriched.event, enriched.ctx);
-    const effectivePolicy = runtimeOverride ? applyRuntimePolicy(basePolicy, runtimeOverride, enriched.event, enriched.ctx) : basePolicy;
+    let runtimeOverride = resolveRuntimePolicyOverride(commandConfig, runtimeState, enriched.event, enriched.ctx);
+    let effectivePolicy = runtimeOverride ? applyRuntimePolicy(basePolicy, runtimeOverride, enriched.event, enriched.ctx) : basePolicy;
+    if (shouldPromoteFirstTagPolicy(effectivePolicy)) {
+      const result = applyRuntimeCommand(
+        commandConfig,
+        runtimeState,
+        enriched.event,
+        enriched.ctx,
+        { action: "set-response", value: "always" },
+        policyActor(enriched.event, enriched.ctx)
+      );
+      await savePolicyState(policyStatePath, result.state);
+      runtimeOverride = resolveRuntimePolicyOverride(commandConfig, result.state, enriched.event, enriched.ctx);
+      effectivePolicy = runtimeOverride ? applyRuntimePolicy(basePolicy, runtimeOverride, enriched.event, enriched.ctx) : basePolicy;
+      api.logger.info(`extra-message-policy: first tag promoted ${result.scope.key} to reply always`);
+    }
     let nativeStatus = null;
     try {
       nativeStatus = resolveNativeRequireMentionStatus(enriched.ctx, currentConfig);
