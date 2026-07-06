@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { registerExtraMessagePolicy } from "../plugin-runtime.js";
 
-async function createHarness(pluginConfig = {}, runtimeConfig = {}) {
+async function createHarness(pluginConfig = {}, runtimeConfig = {}, options = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "extra-message-policy-"));
   const hooks = new Map();
   const logs = [];
@@ -46,23 +46,23 @@ async function createHarness(pluginConfig = {}, runtimeConfig = {}) {
     }
   };
 
-  const result = registerExtraMessagePolicy(api, {
-    discordSdk: {
-      buildDiscordComponentMessage(payload) {
-        builtComponentMessages.push(payload);
-        return {
-          components: [{
-            type: 17,
-            isV2: true,
-            components: [{ type: 1, payload }]
-          }]
-        };
-      },
-      registerBuiltDiscordComponentMessage(payload) {
-        builtComponentMessages.push({ registered: payload });
-      }
+  const discordSdk = options.discordSdk || {
+    buildDiscordComponentMessage(payload) {
+      builtComponentMessages.push(payload);
+      return {
+        components: [{
+          type: 17,
+          isV2: true,
+          components: [{ type: 1, payload }]
+        }]
+      };
+    },
+    registerBuiltDiscordComponentMessage(payload) {
+      builtComponentMessages.push({ registered: payload });
     }
-  });
+  };
+
+  const result = registerExtraMessagePolicy(api, { discordSdk });
 
   return {
     root,
@@ -1452,6 +1452,35 @@ test("golden flow: command and interactive handlers cover dashboard actions", as
   });
   assert.deepEqual(dismiss, { handled: true });
   assert.match(edits.at(-1).text, /dismissed/);
+});
+
+
+test("policy command falls back to text when Discord components fail", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "extra-policy-command-fallback-"));
+  const statePath = path.join(root, "policy-state.json");
+  const harness = await createHarness({
+    policyCommand: { statePath },
+    defaultPolicy: { respond: true, ingestMode: "responseCandidates" }
+  }, {}, {
+    discordSdk: {
+      buildDiscordComponentMessage() {
+        throw new Error("missing Discord public surface");
+      }
+    }
+  });
+
+  const result = await harness.commands[0].handler({
+    args: "status",
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "channel-1",
+    conversationId: "channel:channel-1",
+    senderId: "operator",
+    sessionKey: "agent:main:discord:channel:channel-1"
+  });
+
+  assert.match(result.text, /Message policy/);
+  assert.deepEqual(result.channelData.discord.components, []);
 });
 
 test("golden flow: firstTag promotes exact thread scope to reply always", async () => {

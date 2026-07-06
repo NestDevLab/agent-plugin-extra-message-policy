@@ -615,17 +615,21 @@ function commandEventFromContext(ctx = {}) {
 
 function buildDashboardComponents(view, ctx = {}, discordSdk = {}) {
   if (!view?.componentSpec || typeof discordSdk.buildDiscordComponentMessage !== "function") return [];
-  const buildResult = discordSdk.buildDiscordComponentMessage({
-    spec: view.componentSpec,
-    fallbackText: view.text,
-    sessionKey: ctx?.sessionKey,
-    agentId: ctx?.agentId,
-    accountId: ctx?.accountId
-  });
-  if (typeof discordSdk.registerBuiltDiscordComponentMessage === "function") {
-    discordSdk.registerBuiltDiscordComponentMessage({ buildResult });
+  try {
+    const buildResult = discordSdk.buildDiscordComponentMessage({
+      spec: view.componentSpec,
+      fallbackText: view.text,
+      sessionKey: ctx?.sessionKey,
+      agentId: ctx?.agentId,
+      accountId: ctx?.accountId
+    });
+    if (typeof discordSdk.registerBuiltDiscordComponentMessage === "function") {
+      discordSdk.registerBuiltDiscordComponentMessage({ buildResult });
+    }
+    return flattenClassicActionRows(buildResult.components);
+  } catch {
+    return [];
   }
-  return flattenClassicActionRows(buildResult.components);
 }
 
 function flattenClassicActionRows(components = []) {
