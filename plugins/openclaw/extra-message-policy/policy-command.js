@@ -43,18 +43,86 @@ function parentChannelValue(...values) {
 }
 
 function encodeDashboardScope(scope = {}) {
-  const compact = {
-    f: scope.platform || "",
-    a: scope.accountId || "",
-    g: scope.guildId || "",
-    c: scope.channelId || "",
-    z: scope.conversationId || "",
-    p: scope.parentChannelId || ""
-  };
-  return Buffer.from(JSON.stringify(compact), "utf8").toString("base64url");
+  const compact = [
+    "v1",
+    encodeScopePlatform(scope.platform || ""),
+    encodeScopeField(scope.accountId === "default" ? "" : scope.accountId || ""),
+    encodeScopeField(scope.guildId || ""),
+    encodeScopeField(scope.channelId || ""),
+    encodeScopeField(scope.conversationId || ""),
+    encodeScopeField(scope.parentChannelId || "")
+  ];
+  return compact.join(".");
+}
+
+function encodeScopePlatform(value) {
+  const platform = textValue(value).toLowerCase();
+  if (platform === "discord") return "d";
+  if (platform === "telegram") return "t";
+  return encodeScopeField(platform);
+}
+
+function decodeScopePlatform(value) {
+  if (value === "d") return "discord";
+  if (value === "t") return "telegram";
+  return decodeScopeField(value);
+}
+
+function encodeScopeField(value) {
+  const text = textValue(value);
+  if (!text) return "";
+  if (/^\d{10,30}$/.test(text)) return `n${BigInt(text).toString(36)}`;
+  return `s${Buffer.from(text, "utf8").toString("base64url")}`;
+}
+
+function decodeScopeField(value) {
+  const text = textValue(value);
+  if (!text) return "";
+  if (text.startsWith("n")) {
+    try {
+      return parseBase36BigInt(text.slice(1)).toString(10);
+    } catch {
+      return "";
+    }
+  }
+  if (text.startsWith("s")) {
+    try {
+      return Buffer.from(text.slice(1), "base64url").toString("utf8");
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
+
+function parseBase36BigInt(value) {
+  let result = 0n;
+  for (const char of String(value || "").toLowerCase()) {
+    const code = char.charCodeAt(0);
+    const digit = code >= 48 && code <= 57
+      ? code - 48
+      : code >= 97 && code <= 122
+        ? code - 87
+        : -1;
+    if (digit < 0 || digit >= 36) throw new Error("invalid base36 digit");
+    result = result * 36n + BigInt(digit);
+  }
+  return result;
 }
 
 function decodeDashboardScope(raw) {
+  const text = textValue(raw);
+  if (text.startsWith("v1.")) {
+    const [, platform, accountId, guildId, channelId, conversationId, parentChannelId] = text.split(".");
+    return {
+      platform: decodeScopePlatform(platform),
+      accountId: decodeScopeField(accountId) || "default",
+      guildId: decodeScopeField(guildId),
+      channelId: decodeScopeField(channelId),
+      conversationId: decodeScopeField(conversationId),
+      parentChannelId: decodeScopeField(parentChannelId)
+    };
+  }
   try {
     const parsed = JSON.parse(Buffer.from(String(raw || ""), "base64url").toString("utf8"));
     if (!parsed || typeof parsed !== "object") return null;
@@ -571,7 +639,10 @@ export function parsePolicyDashboardAction(rawPayload = "") {
   if (section === "details") return { action: "details", value: normalizedValue, scope, details: normalizedValue !== "hide" };
   if (section === "dismiss") return { action: "dismiss", scope };
   if (section === "reset") return { action: "reset", scope };
-  if (section === "account") return { action: "select-account", value, scope: { ...(scope || {}), accountId: value } };
+  if (section === "account") {
+    const accountId = value || scope?.accountId || "";
+    return { action: "select-account", value: accountId, scope: { ...(scope || {}), accountId } };
+  }
   if (section === "response") return { action: "set-response", value: normalizedValue, scope };
   if (section === "ingest") return { action: "set-ingest", value: normalizedValue, scope };
   if (section === "native") return { action: "set-native-require", value: normalizedValue, scope };
@@ -921,7 +992,8 @@ export function renderNativeRequireMentionStatus(status) {
 }
 
 function dashboardCallback(action, value, scope) {
-  return `${DASHBOARD_NAMESPACE}:${action}:${value || "_"}:${encodeDashboardScope(scope)}`;
+  const callbackValue = action === "account" ? "_" : value || "_";
+  return `${DASHBOARD_NAMESPACE}:${action}:${callbackValue}:${encodeDashboardScope(scope)}`;
 }
 
 function dashboardButton(params) {

@@ -18,6 +18,10 @@ test("schema exposes response and ingest policy", () => {
   assert.deepEqual(manifest.configSchema.properties.jsonlSink.properties.shardBy.enum, ["none", "dayConversation"]);
 });
 
+test("manifest declares registered agent tools", () => {
+  assert.deepEqual(manifest.contracts.tools.sort(), ["list_extra_message_policies", "search_raw_context"]);
+});
+
 test("README documents memory/context/monitoring ingest", () => {
   assert.match(readme, /Memory ingest/i);
   assert.match(readme, /context accumulation/i);

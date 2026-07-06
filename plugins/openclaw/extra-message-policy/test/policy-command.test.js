@@ -555,6 +555,44 @@ test("dashboard callback payload keeps channel scope for interaction handlers", 
   assert.equal(restoredCtx.conversationId, "thread-1");
 });
 
+test("dashboard callback payloads fit Discord custom id limits for forum threads", () => {
+  const scope = {
+    platform: "discord",
+    accountId: "default",
+    guildId: "1111111111111111111",
+    channelId: "2222222222222222222",
+    conversationId: "2222222222222222222",
+    parentChannelId: "3333333333333333333"
+  };
+  const view = buildPolicyDashboardView({
+    effectivePolicy: {
+      runtimeResponseMode: "firstTag",
+      runtimeIngestMode: "off",
+      respond: true,
+      ingestMode: "none",
+      requireMention: true,
+      runtimeMatched: "runtime-parent"
+    },
+    runtimeOverride: { responseMode: "firstTag", ingestMode: "off" },
+    scope,
+    nativeStatus: { status: "unset" },
+    actorId: "9999999999999999999"
+  });
+  const buttons = view.componentSpec.blocks.flatMap((block) => block.buttons);
+  const responseEntry = buttons.find((entry) => entry.callbackData.startsWith("policy:response:always:"));
+  const command = parsePolicyDashboardAction(responseEntry.callbackData.replace(/^policy:/, ""));
+  const restoredCtx = contextFromPolicyScope(command.scope, { target: "slash:operator" });
+
+  assert.ok(buttons.length > 0);
+  assert.ok(buttons.every((entry) => entry.callbackData.length <= 100));
+  assert.equal(command.action, "set-response");
+  assert.equal(command.value, "always");
+  assert.equal(restoredCtx.guildId, scope.guildId);
+  assert.equal(restoredCtx.channelId, scope.channelId);
+  assert.equal(restoredCtx.conversationId, scope.conversationId);
+  assert.equal(restoredCtx.parentChannelId, scope.parentChannelId);
+});
+
 test("dashboard can switch policy account without manual input", () => {
   const commandConfig = normalizePolicyCommandConfig({ policyCommand: { applyDefault: true } });
   const runtimePolicy = resolveRuntimePolicyOverride(commandConfig, {}, {}, ctx);
@@ -566,14 +604,17 @@ test("dashboard can switch policy account without manual input", () => {
     accountOptions: ["default", "secondary-bot"]
   });
   const buttons = view.componentSpec.blocks.flatMap((block) => block.buttons);
-  const accountEntry = buttons.find((entry) => entry.callbackData.startsWith("policy:account:secondary-bot:"));
+  const accountEntry = buttons.find((entry) => entry.label === "secondary-bot");
   const payload = accountEntry.callbackData.replace(/^policy:/, "");
   const command = parsePolicyDashboardAction(payload);
   const restoredCtx = contextFromPolicyScope(command.scope, ctx);
 
   assert.match(view.text, /Account.*default/);
   assert.equal(view.componentSpec.blocks.length, 5);
+  assert.ok(accountEntry.callbackData.startsWith("policy:account:_:"));
+  assert.ok(accountEntry.callbackData.length <= 100);
   assert.equal(command.action, "select-account");
+  assert.equal(command.value, "secondary-bot");
   assert.equal(restoredCtx.accountId, "secondary-bot");
   assert.equal(restoredCtx.guildId, "guild-1");
   assert.equal(restoredCtx.channelId, "channel-1");
@@ -596,10 +637,13 @@ test("dashboard account selector keeps selected account visible when there are m
   });
   const buttons = view.componentSpec.blocks.flatMap((block) => block.buttons);
   const accountButtons = buttons.filter((entry) => entry.callbackData.startsWith("policy:account:"));
+  const selectedAccount = accountButtons.find((entry) => entry.label === "zeta");
 
   assert.equal(view.componentSpec.blocks.length, 5);
-  assert.ok(accountButtons.some((entry) => entry.callbackData.startsWith("policy:account:zeta:")));
-  assert.equal(accountButtons.find((entry) => entry.callbackData.startsWith("policy:account:zeta:")).style, "success");
+  assert.ok(selectedAccount);
+  assert.ok(selectedAccount.callbackData.startsWith("policy:account:_:"));
+  assert.ok(selectedAccount.callbackData.length <= 100);
+  assert.equal(selectedAccount.style, "success");
 });
 
 test("dashboard accounts include configured discord and mention-detection accounts", () => {
