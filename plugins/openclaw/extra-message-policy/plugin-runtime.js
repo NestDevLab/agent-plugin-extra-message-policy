@@ -602,6 +602,12 @@ function isPolicyCommand(commandConfig, event = {}, ctx = {}) {
   return textFrom(event, ctx).trim().startsWith(`/${commandConfig.commandName}`);
 }
 
+function isLikelyTextCommand(event = {}, ctx = {}) {
+  if (commandNameFrom(event, ctx)) return true;
+  const text = textFrom(event, ctx).trim();
+  return text.startsWith("/");
+}
+
 function commandEventFromContext(ctx = {}) {
   return {
     accountId: ctx?.accountId,
@@ -919,10 +925,19 @@ export function registerExtraMessagePolicy(api, options = {}) {
   });
 
   api.on("inbound_claim", async (event, ctx) => {
+    // inbound_claim runs before command routing and Codex/App Server dispatch.
     if (isPolicyCommand(commandConfig, event, ctx)) return;
     rememberDiscordRoute(state, event, ctx);
     rememberMentionFact(state, event, ctx);
-  });
+    if (isLikelyTextCommand(event, ctx)) return;
+    const policy = await resolveEffectivePolicy(event, ctx);
+    if (shouldSuppressResponse(policy)) {
+      rememberResponsePolicy(state, event, ctx, policy);
+      await ingest(api, cfg, state, "before_dispatch", event, ctx, policy);
+      api.logger.info(`extra-message-policy: suppressed inbound claim for ${ctx.sessionKey || ctx.conversationId || ctx.channelId || "unknown"}`);
+      return { handled: true };
+    }
+  }, { priority: 1000 });
 
   api.on("message_received", async (event, ctx) => {
     if (isPolicyCommand(commandConfig, event, ctx)) return;

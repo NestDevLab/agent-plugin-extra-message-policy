@@ -801,6 +801,74 @@ test("golden flow: Discord runtime-shaped context suppresses unmentioned replies
   assert.equal(outbound?.cancel, undefined);
 });
 
+test("golden flow: inbound_claim suppresses unmentioned Discord before Codex can claim", async () => {
+  const jsonlPath = path.join(os.tmpdir(), `extra-policy-${Date.now()}-inbound-claim.jsonl`);
+  const harness = await createHarness({
+    defaultPolicy: { respond: true, ingestMode: "all" },
+    policies: [
+      { channelId: "claim-channel", respond: true, ingestMode: "all", requireMention: true }
+    ],
+    jsonlSink: { enabled: true, path: jsonlPath }
+  });
+
+  const event = {
+    MessageId: "msg-inbound-suppress",
+    content: "not addressed to the bot",
+    WasMentioned: false,
+    timestamp: Date.now()
+  };
+  const ctx = {
+    AccountId: "default",
+    GroupSpace: "guild-1",
+    ChannelId: "claim-channel",
+    NativeChannelId: "claim-channel",
+    OriginatingTo: "channel:claim-channel",
+    SessionKey: "agent:main:discord:channel:claim-channel",
+    SenderId: "user-1",
+    MessageId: "msg-inbound-suppress",
+    WasMentioned: false
+  };
+
+  const claim = await harness.emit("inbound_claim", event, ctx);
+
+  assert.deepEqual(claim, { handled: true });
+  assert.equal(harness.logs.some((entry) => entry.message.includes("suppressed inbound claim")), true);
+
+  const rows = await readJsonl(jsonlPath);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].source, "before_dispatch");
+  assert.equal(rows[0].policy.respond, false);
+  assert.equal(rows[0].policy.ingestMode, "all");
+  assert.equal(rows[0].policy.matched, "channelId:claim-channel");
+});
+
+test("golden flow: inbound_claim leaves slash commands available in mention-only channels", async () => {
+  const harness = await createHarness({
+    defaultPolicy: { respond: true, ingestMode: "all" },
+    policies: [
+      { channelId: "command-channel", respond: true, ingestMode: "all", requireMention: true }
+    ]
+  });
+
+  const claim = await harness.emit("inbound_claim", {
+    messageId: "msg-command",
+    content: "/status",
+    wasMentioned: false,
+    timestamp: Date.now()
+  }, {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "command-channel",
+    conversationId: "channel:command-channel",
+    sessionKey: "agent:main:discord:channel:command-channel",
+    senderId: "user-1",
+    messageId: "msg-command",
+    wasMentioned: false
+  });
+
+  assert.equal(claim, undefined);
+});
+
 test("golden flow: explicit response modes override native requireMention end-to-end", async () => {
   const harness = await createHarness({
     defaultPolicy: { respond: false, ingestMode: "none" },
