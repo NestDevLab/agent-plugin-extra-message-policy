@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createDiscordSdkCompat } from "../discord-sdk-compat.js";
 import { applyNativeReplyHandling, normalizeNativeReplyHandling } from "../native-reply.js";
 import {
   deriveNativeReplyMentionFact,
@@ -11,6 +12,59 @@ import {
   withDerivedMentionFact,
   withRecalledMentionFact
 } from "../runtime-context.js";
+
+test("Discord SDK compat falls back to external plugin public surfaces", () => {
+  const calls = [];
+  const compat = createDiscordSdkCompat({
+    buildDiscordComponentMessage() {
+      throw new Error("Unable to resolve bundled plugin public surface discord/api.js");
+    },
+    registerBuiltDiscordComponentMessage() {
+      throw new Error("Unable to resolve bundled plugin public surface discord/runtime-api.js");
+    }
+  }, {
+    moduleRequire(specifier) {
+      calls.push(specifier);
+      if (specifier === "@openclaw/discord/dist/api.js") {
+        return {
+          buildDiscordComponentMessage(payload) {
+            calls.push(["build", payload]);
+            return { components: [{ type: 1, payload }] };
+          }
+        };
+      }
+      if (specifier === "@openclaw/discord/dist/runtime-api.js") {
+        return {
+          registerBuiltDiscordComponentMessage(payload) {
+            calls.push(["register", payload]);
+            return "registered";
+          }
+        };
+      }
+      throw new Error(`unexpected require: ${specifier}`);
+    }
+  });
+
+  const payload = { spec: { blocks: [] } };
+  assert.deepEqual(compat.buildDiscordComponentMessage(payload), { components: [{ type: 1, payload }] });
+  assert.equal(compat.registerBuiltDiscordComponentMessage({ buildResult: payload }), "registered");
+  assert.deepEqual(calls, [
+    "@openclaw/discord/dist/api.js",
+    ["build", payload],
+    "@openclaw/discord/dist/runtime-api.js",
+    ["register", { buildResult: payload }]
+  ]);
+});
+
+test("Discord SDK compat preserves non-resolution component errors", () => {
+  const compat = createDiscordSdkCompat({
+    buildDiscordComponentMessage() {
+      throw new Error("invalid component spec");
+    }
+  }, { moduleRequire: () => ({}) });
+
+  assert.throws(() => compat.buildDiscordComponentMessage({}), /invalid component spec/u);
+});
 
 test("recalled mention facts enrich reduced before_dispatch events", () => {
   const state = { mentionFacts: new Map() };

@@ -3,8 +3,10 @@ import {
   buildDiscordComponentMessage,
   registerBuiltDiscordComponentMessage
 } from "openclaw/plugin-sdk/discord";
+import { createDiscordSdkCompat } from "./discord-sdk-compat.js";
 import { registerExtraMessagePolicy } from "./plugin-runtime.js";
 
+export { createDiscordSdkCompat } from "./discord-sdk-compat.js";
 export { registerExtraMessagePolicy } from "./plugin-runtime.js";
 
 export default definePluginEntry({
@@ -13,10 +15,10 @@ export default definePluginEntry({
   description: "Cross-platform message ingest and response policy enforcement",
   register(api) {
     registerExtraMessagePolicy(api, {
-      discordSdk: {
+      discordSdk: createDiscordSdkCompat({
         buildDiscordComponentMessage,
         registerBuiltDiscordComponentMessage
-      }
+      })
     });
   }
 });

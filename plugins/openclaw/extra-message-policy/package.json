@@ -10,7 +10,7 @@
     ]
   },
   "scripts": {
-    "build": "node --check index.js && node --check plugin-runtime.js && node --check policy.js && node --check policy-audit.js && node --check policy-command.js && node --check native-reply.js && node --check raw-recall.js && node --check runtime-context.js",
+    "build": "node --check index.js && node --check discord-sdk-compat.js && node --check plugin-runtime.js && node --check policy.js && node --check policy-audit.js && node --check policy-command.js && node --check native-reply.js && node --check raw-recall.js && node --check runtime-context.js",
     "test": "node --test",
     "test:coverage": "node --test --experimental-test-coverage",
     "lint": "npm run build"
@@ -31,6 +31,7 @@
   },
   "files": [
     "index.js",
+    "discord-sdk-compat.js",
     "plugin-runtime.js",
     "policy.js",
     "policy-audit.js",
