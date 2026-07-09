@@ -84,6 +84,62 @@ async function readJsonl(filePath) {
   return raw.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
 }
 
+test("derived bot mention overrides explicit false mention fact before dispatch", async () => {
+  const botId = "111111111111111111";
+  const harness = await createHarness({
+    defaultPolicy: { respond: true, ingestMode: "responseCandidates", requireMention: true },
+    mentionDetection: { accounts: { default: { botIds: [botId] } } }
+  }, {
+    channels: { discord: { accounts: { default: {} } } }
+  });
+
+  const event = {
+    messageId: "msg-explicit-false",
+    content: `<@${botId}>`,
+    wasMentioned: false
+  };
+  const ctx = {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "thread-1",
+    conversationId: "channel:thread-1",
+    sessionKey: "agent:main:discord:channel:thread-1",
+    senderId: "user-1",
+    messageId: "msg-explicit-false"
+  };
+
+  const dispatch = await harness.emit("before_dispatch", event, ctx);
+  assert.equal(dispatch, undefined);
+});
+
+test("Discord mentions array overrides explicit false mention fact without content", async () => {
+  const botId = "111111111111111111";
+  const harness = await createHarness({
+    defaultPolicy: { respond: true, ingestMode: "responseCandidates", requireMention: true },
+    mentionDetection: { accounts: { default: { botIds: [botId] } } }
+  }, {
+    channels: { discord: { accounts: { default: {} } } }
+  });
+
+  const event = {
+    messageId: "msg-mentions-array",
+    wasMentioned: false,
+    metadata: { message: { mentions: [{ id: botId }] } }
+  };
+  const ctx = {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "thread-1",
+    conversationId: "channel:thread-1",
+    sessionKey: "agent:main:discord:channel:thread-1",
+    senderId: "user-1",
+    messageId: "msg-mentions-array"
+  };
+
+  const dispatch = await harness.emit("before_dispatch", event, ctx);
+  assert.equal(dispatch, undefined);
+});
+
 test("golden flow: child Discord thread overrides suppressed parent policy", async () => {
   const jsonlPath = path.join(os.tmpdir(), `extra-policy-${Date.now()}-thread.jsonl`);
   const harness = await createHarness({
@@ -656,7 +712,7 @@ test("golden flow: Discord reply to bot satisfies requireMention policy", async 
     mentionDetection: {
       accounts: {
         default: {
-          botIds: ["1494581796120301598"]
+          botIds: ["111111111111111111"]
         }
       }
     }
@@ -667,7 +723,7 @@ test("golden flow: Discord reply to bot satisfies requireMention policy", async 
     content: "yes, continue",
     metadata: {
       referenced_message: {
-        author: { id: "1494581796120301598" }
+        author: { id: "111111111111111111" }
       }
     },
     timestamp: Date.now()
@@ -882,7 +938,7 @@ test("golden flow: explicit response modes override native requireMention end-to
       discord: {
         accounts: {
           default: {
-            botUserId: "1494581796120301598",
+            botUserId: "111111111111111111",
             guilds: {
               "guild-1": {
                 channels: {
@@ -925,13 +981,13 @@ test("golden flow: explicit response modes override native requireMention end-to
     },
     {
       suffix: "mention",
-      event: { content: "<@1494581796120301598> explicitly disabled", wasMentioned: true }
+      event: { content: "<@111111111111111111> explicitly disabled", wasMentioned: true }
     },
     {
       suffix: "reply",
       event: {
         content: "reply to bot but explicitly disabled",
-        metadata: { referenced_message: { author: { id: "1494581796120301598" } } }
+        metadata: { referenced_message: { author: { id: "111111111111111111" } } }
       }
     }
   ]) {
@@ -986,7 +1042,7 @@ test("golden flow: explicit response modes override native requireMention end-to
   const mentionReplyDispatch = await harness.emit("before_dispatch", {
     messageId: "msg-mention-reply",
     content: "reply to bot in plugin mention mode",
-    metadata: { referenced_message: { author: { id: "1494581796120301598" } } },
+    metadata: { referenced_message: { author: { id: "111111111111111111" } } },
     timestamp: Date.now()
   }, mentionReplyCtx);
   const mentionReplyOutbound = await harness.emit("message_sending", { content: "reply" }, mentionReplyCtx);

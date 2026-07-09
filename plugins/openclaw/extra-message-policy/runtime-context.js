@@ -258,6 +258,70 @@ function matchesDiscordBotMention(text, ids = []) {
   return ids.some((id) => new RegExp(String.raw`<@!?${escapeRegExp(id)}>`, "i").test(text));
 }
 
+function mentionEntryId(value) {
+  if (!value) return "";
+  const text = textValue(value);
+  if (/^\d{15,25}$/.test(text)) return text;
+  if (typeof value !== "object") return "";
+  return textValue(
+    value.id,
+    value.userId,
+    value.user_id,
+    value.botId,
+    value.bot_id,
+    value.authorId,
+    value.author_id,
+    value.user?.id,
+    value.member?.user?.id
+  );
+}
+
+function mentionedUserIds(event = {}, ctx = {}) {
+  const metadata = event?.metadata && typeof event.metadata === "object" ? event.metadata : {};
+  const ctxMetadata = ctx?.metadata && typeof ctx.metadata === "object" ? ctx.metadata : {};
+  const discordMetadata = firstObject(metadata.discord, metadata.channelData?.discord, event.channelData?.discord, ctx.channelData?.discord);
+  const sources = [
+    event.mentions,
+    event.Mentions,
+    event.mentionUsers,
+    event.mentionedUsers,
+    event.message?.mentions,
+    event.raw?.mentions,
+    metadata.mentions,
+    metadata.Mentions,
+    metadata.mentionUsers,
+    metadata.mentionedUsers,
+    metadata.message?.mentions,
+    metadata.raw?.mentions,
+    discordMetadata?.mentions,
+    discordMetadata?.message?.mentions,
+    ctx.mentions,
+    ctx.Mentions,
+    ctx.mentionUsers,
+    ctx.mentionedUsers,
+    ctx.message?.mentions,
+    ctxMetadata.mentions,
+    ctxMetadata.Mentions,
+    ctxMetadata.mentionUsers,
+    ctxMetadata.mentionedUsers,
+    ctxMetadata.message?.mentions
+  ];
+  const ids = new Set();
+  for (const source of sources) {
+    const entries = Array.isArray(source) ? source : (source ? [source] : []);
+    for (const entry of entries) {
+      const id = mentionEntryId(entry);
+      if (/^\d{15,25}$/.test(id)) ids.add(id);
+    }
+  }
+  return [...ids];
+}
+
+function matchesDiscordMentionList(mentionedIds = [], botIds = []) {
+  const mentioned = new Set(mentionedIds.map((id) => String(id)));
+  return botIds.some((id) => mentioned.has(String(id)));
+}
+
 function replyTargetAuthorId(event = {}, ctx = {}) {
   const metadata = event?.metadata && typeof event.metadata === "object" ? event.metadata : {};
   const discordMetadata = firstObject(metadata.discord, metadata.channelData?.discord, event.channelData?.discord, ctx.channelData?.discord);
@@ -315,11 +379,13 @@ export function deriveMentionFact(event = {}, ctx = {}, cfg = {}, pluginConfig =
   const replyMention = deriveNativeReplyMentionFact(event, ctx, cfg, pluginConfig);
   if (typeof replyMention === "boolean") return replyMention;
 
-  const text = messageText(event, ctx);
-  if (!text) return undefined;
   const accountId = textValue(ctx.accountId, event.accountId, event.metadata?.accountId, "default");
   const agentId = agentIdFromSessionKey(ctx.sessionKey, event.sessionKey);
   const botIds = configuredBotIds(cfg, pluginConfig, accountId);
+  if (matchesDiscordMentionList(mentionedUserIds(event, ctx), botIds)) return true;
+
+  const text = messageText(event, ctx);
+  if (!text) return undefined;
   if (matchesDiscordBotMention(text, botIds)) return true;
   if (matchesConfiguredPatterns(text, configuredMentionPatterns(cfg, pluginConfig, accountId, agentId))) return true;
   const detection = accountDetectionConfig(pluginConfig, accountId);
@@ -340,10 +406,16 @@ export function withDerivedMentionFact(state, event = {}, ctx = {}, cfg = {}, pl
       ctx: { ...recalled.ctx, wasMentioned: true }
     };
   }
+  const mentioned = deriveMentionFact(recalled.event, recalled.ctx, cfg, pluginConfig);
+  if (mentioned === true) {
+    return {
+      event: { ...recalled.event, wasMentioned: true },
+      ctx: { ...recalled.ctx, wasMentioned: true }
+    };
+  }
   if (typeof recalled.event.wasMentioned === "boolean" || typeof recalled.ctx.wasMentioned === "boolean") {
     return recalled;
   }
-  const mentioned = deriveMentionFact(recalled.event, recalled.ctx, cfg, pluginConfig);
   if (typeof mentioned !== "boolean") return recalled;
   return {
     event: { ...recalled.event, wasMentioned: mentioned },

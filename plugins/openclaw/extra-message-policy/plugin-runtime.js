@@ -767,6 +767,13 @@ export function registerExtraMessagePolicy(api, options = {}) {
       currentConfig,
       api.pluginConfig || {}
     );
+    // The Discord inbound_claim hook can see the raw message text and derive an
+    // explicit <@bot_id> mention, while the later before_dispatch hook may only
+    // receive a reduced context. Persist derived mention facts here so the
+    // before_dispatch gate does not suppress a turn that was already addressed.
+    if (typeof enriched.event?.wasMentioned === "boolean" || typeof enriched.ctx?.wasMentioned === "boolean") {
+      rememberMentionFact(state, enriched.event, enriched.ctx);
+    }
     const basePolicy = resolvePolicy(cfg, enriched.event, enriched.ctx);
     const runtimeState = await loadPolicyState(policyStatePath);
     let runtimeOverride = resolveRuntimePolicyOverride(commandConfig, runtimeState, enriched.event, enriched.ctx);
