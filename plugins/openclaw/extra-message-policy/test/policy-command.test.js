@@ -289,6 +289,25 @@ test("runtime scope ignores slash conversation id when channel id is available",
   assert.equal(result.scope.channelId, "channel-1");
 });
 
+test("runtime scope ignores provider sentinel channel id in interaction callbacks", () => {
+  const commandConfig = normalizePolicyCommandConfig({});
+  const callbackCtx = {
+    accountId: "default",
+    guildId: "guild-1",
+    provider: "discord",
+    channelId: "discord",
+    interaction: {
+      channelId: "channel-1"
+    },
+    target: "slash:111111111111111111"
+  };
+  const result = applyRuntimeCommand(commandConfig, {}, {}, callbackCtx, parsePolicyCommand("response mention"), "operator");
+  const keys = Object.keys(result.state.scopes);
+
+  assert.deepEqual(keys, ["discord:default:guild-1:channel-1"]);
+  assert.equal(result.scope.channelId, "channel-1");
+});
+
 test("runtime scope falls back to Discord channel from session key", () => {
   const commandConfig = normalizePolicyCommandConfig({});
   const state = {

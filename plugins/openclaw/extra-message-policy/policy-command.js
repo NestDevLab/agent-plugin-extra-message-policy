@@ -176,6 +176,17 @@ function nonSlashValue(...values) {
   return "";
 }
 
+function nonProviderChannelValue(platform, ...values) {
+  const providerNames = new Set(["discord", "telegram", platform].filter(Boolean));
+  for (const value of values) {
+    const text = stripConversationPrefix(textValue(value));
+    if (!text || isSlashInteractionTarget(text)) continue;
+    if (providerNames.has(text.toLowerCase())) continue;
+    return text;
+  }
+  return "";
+}
+
 function discordSessionScope(...values) {
   for (const value of values) {
     const text = textValue(value);
@@ -378,7 +389,7 @@ export function scopeFromContext(event = {}, ctx = {}) {
     event.raw?.parentId,
     event.raw?.parent_id
   ));
-  const directParentAwareChannelId = textValue(
+  const directParentAwareChannelId = nonProviderChannelValue(platform,
     parentChannelId,
     ctx.metadata?.channelId,
     ctx.metadata?.channel_id
@@ -416,7 +427,7 @@ export function scopeFromContext(event = {}, ctx = {}) {
   const conversationId = stripConversationPrefix(
     directChannelId || rawConversationId || rawTarget
   );
-  const channelId = stripConversationPrefix(textValue(
+  const channelId = nonProviderChannelValue(platform,
     directParentAwareChannelId,
     ctx.channelId,
     ctx.ChannelId,
@@ -446,7 +457,7 @@ export function scopeFromContext(event = {}, ctx = {}) {
     event.metadata?.chatId,
     event.metadata?.chat_id,
     sessionScope.channelId
-  ));
+  );
   return {
     platform,
     accountId,
