@@ -43,6 +43,19 @@ function textValue(...values) {
   return "";
 }
 
+function objectValue(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+
+function resolveCurrentPluginConfig(currentConfig = {}, fallback = {}) {
+  const configured = objectValue(currentConfig?.plugins?.entries?.["extra-message-policy"]?.config);
+  if (!configured) return fallback || {};
+  return {
+    ...(fallback || {}),
+    ...configured
+  };
+}
+
 function stripConversationPrefix(value) {
   return String(value || "").trim().replace(/^(channel|chat|user):/, "");
 }
@@ -758,6 +771,7 @@ export function registerExtraMessagePolicy(api, options = {}) {
   const resolveEffectivePolicy = async (event = {}, ctx = {}) => {
     const routed = withRememberedDiscordRoute(state, event, ctx);
     const currentConfig = api.runtime?.config?.current?.() || api.config || {};
+    const currentPluginConfig = resolveCurrentPluginConfig(currentConfig, api.pluginConfig || {});
     const hydrated = await withHydratedDiscordParent(state, routed.event, routed.ctx, currentConfig, api.logger);
     if (hydrated !== routed) rememberDiscordRoute(state, hydrated.event, hydrated.ctx);
     const enriched = withDerivedMentionFact(
@@ -765,7 +779,7 @@ export function registerExtraMessagePolicy(api, options = {}) {
       hydrated.event,
       hydrated.ctx,
       currentConfig,
-      api.pluginConfig || {}
+      currentPluginConfig
     );
     // The Discord inbound_claim hook can see the raw message text and derive an
     // explicit <@bot_id> mention, while the later before_dispatch hook may only

@@ -140,6 +140,40 @@ test("Discord mentions array overrides explicit false mention fact without conte
   assert.equal(dispatch, undefined);
 });
 
+test("runtime plugin config mention detection overrides explicit false mention fact", async () => {
+  const botId = "111111111111111111";
+  const harness = await createHarness({
+    defaultPolicy: { respond: true, ingestMode: "responseCandidates", requireMention: true }
+  }, {
+    plugins: {
+      entries: {
+        "extra-message-policy": {
+          config: {
+            mentionDetection: { accounts: { default: { botIds: [botId] } } }
+          }
+        }
+      }
+    },
+    channels: { discord: { accounts: { default: {} } } }
+  });
+
+  const dispatch = await harness.emit("before_dispatch", {
+    messageId: "msg-runtime-config-mention",
+    content: `<@${botId}>`,
+    wasMentioned: false
+  }, {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "thread-1",
+    conversationId: "channel:thread-1",
+    sessionKey: "agent:main:discord:channel:thread-1",
+    senderId: "user-1",
+    messageId: "msg-runtime-config-mention"
+  });
+
+  assert.equal(dispatch, undefined);
+});
+
 test("golden flow: child Discord thread overrides suppressed parent policy", async () => {
   const jsonlPath = path.join(os.tmpdir(), `extra-policy-${Date.now()}-thread.jsonl`);
   const harness = await createHarness({
