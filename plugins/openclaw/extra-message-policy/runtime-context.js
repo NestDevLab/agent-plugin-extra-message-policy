@@ -52,18 +52,20 @@ export function recalledMentionFact(state, event = {}, ctx = {}) {
 }
 
 export function withRecalledMentionFact(state, event = {}, ctx = {}) {
-  if (
-    typeof event.wasMentioned === "boolean"
+  const mentioned = recalledMentionFact(state, event, ctx);
+  if (mentioned === true) {
+    return {
+      event: { ...event, wasMentioned: true },
+      ctx: { ...ctx, wasMentioned: true }
+    };
+  }
+  const hasExplicitMentionFact = typeof event.wasMentioned === "boolean"
     || typeof event.WasMentioned === "boolean"
     || typeof event.was_mentioned === "boolean"
     || typeof ctx.wasMentioned === "boolean"
     || typeof ctx.WasMentioned === "boolean"
-    || typeof ctx.was_mentioned === "boolean"
-  ) {
-    return { event, ctx };
-  }
-  const mentioned = recalledMentionFact(state, event, ctx);
-  if (typeof mentioned !== "boolean") return { event, ctx };
+    || typeof ctx.was_mentioned === "boolean";
+  if (hasExplicitMentionFact || typeof mentioned !== "boolean") return { event, ctx };
   return {
     event: { ...event, wasMentioned: mentioned },
     ctx: { ...ctx, wasMentioned: mentioned }
