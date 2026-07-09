@@ -670,6 +670,15 @@ function parseOnOff(raw) {
   return null;
 }
 
+function discordZoneValue(...values) {
+  for (const value of values) {
+    const text = stripConversationPrefix(textValue(value));
+    if (!text || text === "discord") continue;
+    return text;
+  }
+  return "";
+}
+
 function resolveDiscordAccountId(ctx = {}, cfg = {}) {
   const explicit = textValue(
     ctx.accountId,
@@ -762,7 +771,7 @@ export function resolveNativeRequireMentionTarget(ctx = {}, cfg = {}) {
   });
   if (platform !== "discord") return { error: "This permanent config operation currently supports Discord only." };
 
-  const directChannelId = textValue(
+  const directChannelId = discordZoneValue(
     ctx.threadId,
     ctx.messageThreadId,
     ctx.MessageThreadId,
@@ -797,8 +806,8 @@ export function resolveNativeRequireMentionTarget(ctx = {}, cfg = {}) {
     ctx.raw?.parentId,
     ctx.raw?.parent_id
   );
-  const targetValue = textValue(ctx.To, ctx.to, ctx.target, ctx.conversationId, ctx.chatId);
-  const zoneId = directChannelId || stripConversationPrefix(targetValue);
+  const targetValue = discordZoneValue(ctx.To, ctx.to, ctx.target, ctx.conversationId, ctx.chatId);
+  const zoneId = directChannelId || targetValue;
   if (!zoneId) return { error: "Unable to resolve the current Discord channel or thread." };
 
   const accountId = resolveDiscordAccountId(ctx, cfg);
