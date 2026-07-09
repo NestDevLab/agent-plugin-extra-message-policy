@@ -57,6 +57,50 @@ test("session rules support platform-wide policies", () => {
   assert.equal(shouldSuppressResponse(policy), true);
 });
 
+test("explicit requireMention false is preserved for policy exceptions", () => {
+  const cfg = normalizeConfig({
+    defaultPolicy: { respond: true, ingestMode: "all", requireMention: true },
+    policies: [
+      {
+        conversationIdRegex: "^(telegram:)?-1003898010655:topic:(421|4640)$",
+        respond: true,
+        ingestMode: "all",
+        requireMention: false
+      },
+      {
+        conversationIdRegex: "^(telegram:)?-1003898010655(?::topic:\\d+)?$",
+        respond: true,
+        ingestMode: "all",
+        requireMention: true
+      },
+      { sessionKeyIncludes: "telegram:", respond: true, ingestMode: "all", requireMention: false }
+    ]
+  });
+
+  const botroom = resolvePolicy(cfg, { wasMentioned: false }, {
+    conversationId: "telegram:-1003898010655:topic:421",
+    sessionKey: "agent:main:telegram:group:-1003898010655:topic:421"
+  });
+  assert.equal(botroom.respond, true);
+  assert.equal(botroom.requireMention, false);
+  assert.equal(botroom.mentionRequired, undefined);
+
+  const staffTopic = resolvePolicy(cfg, { wasMentioned: false }, {
+    conversationId: "telegram:-1003898010655:topic:85",
+    sessionKey: "agent:main:telegram:group:-1003898010655:topic:85"
+  });
+  assert.equal(staffTopic.respond, false);
+  assert.equal(staffTopic.requireMention, true);
+  assert.equal(staffTopic.mentionSatisfied, false);
+
+  const otherTelegram = resolvePolicy(cfg, { wasMentioned: false }, {
+    conversationId: "telegram:-1001841892299:topic:1803",
+    sessionKey: "agent:main:telegram:group:-1001841892299:topic:1803"
+  });
+  assert.equal(otherTelegram.respond, true);
+  assert.equal(otherTelegram.requireMention, false);
+});
+
 test("more specific channel policy wins over broader session policy regardless of order", () => {
   const cfg = normalizeConfig({
     policies: [

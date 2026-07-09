@@ -54,27 +54,50 @@ function channelIdFromSessionKey(value) {
   return match?.[1] || "";
 }
 
+function firstDiscordChannelId(...values) {
+  const candidates = values
+    .map((value) => stripConversationPrefix(String(value ?? "").trim()))
+    .filter(Boolean);
+  return candidates.find(looksLikeDiscordSnowflake) || candidates[0] || "";
+}
+
 function routeChannelId(event = {}, ctx = {}) {
-  return stripConversationPrefix(textValue(
+  return firstDiscordChannelId(
     ctx.NativeChannelId,
     ctx.ChannelId,
     ctx.channelId,
+    ctx.threadId,
+    ctx.ThreadId,
     ctx.conversationId,
     ctx.OriginatingTo,
     ctx.To,
     event.NativeChannelId,
     event.ChannelId,
     event.channelId,
+    event.threadId,
+    event.ThreadId,
     event.conversationId,
     event.OriginatingTo,
     event.To,
     event.metadata?.channelId,
     event.metadata?.channel_id,
+    event.metadata?.threadId,
+    event.metadata?.thread_id,
     event.metadata?.to,
     ctx.metadata?.channelId,
     ctx.metadata?.channel_id,
-    ctx.metadata?.to
-  ));
+    ctx.metadata?.threadId,
+    ctx.metadata?.thread_id,
+    ctx.metadata?.to,
+    channelIdFromSessionKey(ctx.SessionKey),
+    channelIdFromSessionKey(ctx.sessionKey),
+    channelIdFromSessionKey(event.SessionKey),
+    channelIdFromSessionKey(event.sessionKey),
+    channelIdFromSessionKey(ctx.metadata?.sessionKey),
+    channelIdFromSessionKey(ctx.metadata?.session_key),
+    channelIdFromSessionKey(event.metadata?.sessionKey),
+    channelIdFromSessionKey(event.metadata?.session_key)
+  );
 }
 
 function routeParentChannelId(event = {}, ctx = {}) {
@@ -198,7 +221,6 @@ function discordTokenForAccount(openclawConfig = {}, accountId = "") {
   const token = account?.token || openclawConfig?.channels?.discord?.token;
   if (typeof token === "string") return token;
   if (token && typeof token === "object") {
-    if (token.source === "env" && token.id) return process.env[token.id] || "";
     if (typeof token.value === "string") return token.value;
   }
   return "";
@@ -580,6 +602,12 @@ function isPolicyCommand(commandConfig, event = {}, ctx = {}) {
   return textFrom(event, ctx).trim().startsWith(`/${commandConfig.commandName}`);
 }
 
+function isLikelyTextCommand(event = {}, ctx = {}) {
+  if (commandNameFrom(event, ctx)) return true;
+  const text = textFrom(event, ctx).trim();
+  return text.startsWith("/");
+}
+
 function commandEventFromContext(ctx = {}) {
   return {
     accountId: ctx?.accountId,
@@ -593,17 +621,21 @@ function commandEventFromContext(ctx = {}) {
 
 function buildDashboardComponents(view, ctx = {}, discordSdk = {}) {
   if (!view?.componentSpec || typeof discordSdk.buildDiscordComponentMessage !== "function") return [];
-  const buildResult = discordSdk.buildDiscordComponentMessage({
-    spec: view.componentSpec,
-    fallbackText: view.text,
-    sessionKey: ctx?.sessionKey,
-    agentId: ctx?.agentId,
-    accountId: ctx?.accountId
-  });
-  if (typeof discordSdk.registerBuiltDiscordComponentMessage === "function") {
-    discordSdk.registerBuiltDiscordComponentMessage({ buildResult });
+  try {
+    const buildResult = discordSdk.buildDiscordComponentMessage({
+      spec: view.componentSpec,
+      fallbackText: view.text,
+      sessionKey: ctx?.sessionKey,
+      agentId: ctx?.agentId,
+      accountId: ctx?.accountId
+    });
+    if (typeof discordSdk.registerBuiltDiscordComponentMessage === "function") {
+      discordSdk.registerBuiltDiscordComponentMessage({ buildResult });
+    }
+    return flattenClassicActionRows(buildResult.components);
+  } catch {
+    return [];
   }
-  return flattenClassicActionRows(buildResult.components);
 }
 
 function flattenClassicActionRows(components = []) {
@@ -694,6 +726,15 @@ function shouldForceReplyContext(policy = {}) {
     && policy.requireMention !== true;
 }
 
+function shouldPromoteFirstTagPolicy(policy = {}) {
+  return policy.runtimeResponseMode === "firstTag"
+    && policy.mentionSatisfied === true;
+}
+
+function policyActor(event = {}, ctx = {}) {
+  return ctx.senderId || ctx.SenderId || event.senderId || event.SenderId || "";
+}
+
 export function registerExtraMessagePolicy(api, options = {}) {
   const cfg = normalizeConfig(api.pluginConfig || {});
   const commandConfig = normalizePolicyCommandConfig(api.pluginConfig || {});
@@ -728,8 +769,22 @@ export function registerExtraMessagePolicy(api, options = {}) {
     );
     const basePolicy = resolvePolicy(cfg, enriched.event, enriched.ctx);
     const runtimeState = await loadPolicyState(policyStatePath);
-    const runtimeOverride = resolveRuntimePolicyOverride(commandConfig, runtimeState, enriched.event, enriched.ctx);
-    const effectivePolicy = runtimeOverride ? applyRuntimePolicy(basePolicy, runtimeOverride, enriched.event, enriched.ctx) : basePolicy;
+    let runtimeOverride = resolveRuntimePolicyOverride(commandConfig, runtimeState, enriched.event, enriched.ctx);
+    let effectivePolicy = runtimeOverride ? applyRuntimePolicy(basePolicy, runtimeOverride, enriched.event, enriched.ctx) : basePolicy;
+    if (shouldPromoteFirstTagPolicy(effectivePolicy)) {
+      const result = applyRuntimeCommand(
+        commandConfig,
+        runtimeState,
+        enriched.event,
+        enriched.ctx,
+        { action: "set-response", value: "always" },
+        policyActor(enriched.event, enriched.ctx)
+      );
+      await savePolicyState(policyStatePath, result.state);
+      runtimeOverride = resolveRuntimePolicyOverride(commandConfig, result.state, enriched.event, enriched.ctx);
+      effectivePolicy = runtimeOverride ? applyRuntimePolicy(basePolicy, runtimeOverride, enriched.event, enriched.ctx) : basePolicy;
+      api.logger.info(`extra-message-policy: first tag promoted ${result.scope.key} to reply always`);
+    }
     let nativeStatus = null;
     try {
       nativeStatus = resolveNativeRequireMentionStatus(enriched.ctx, currentConfig);
@@ -870,10 +925,19 @@ export function registerExtraMessagePolicy(api, options = {}) {
   });
 
   api.on("inbound_claim", async (event, ctx) => {
+    // inbound_claim runs before command routing and Codex/App Server dispatch.
     if (isPolicyCommand(commandConfig, event, ctx)) return;
     rememberDiscordRoute(state, event, ctx);
     rememberMentionFact(state, event, ctx);
-  });
+    if (isLikelyTextCommand(event, ctx)) return;
+    const policy = await resolveEffectivePolicy(event, ctx);
+    if (shouldSuppressResponse(policy)) {
+      rememberResponsePolicy(state, event, ctx, policy);
+      await ingest(api, cfg, state, "before_dispatch", event, ctx, policy);
+      api.logger.info(`extra-message-policy: suppressed inbound claim for ${ctx.sessionKey || ctx.conversationId || ctx.channelId || "unknown"}`);
+      return { handled: true };
+    }
+  }, { priority: 1000 });
 
   api.on("message_received", async (event, ctx) => {
     if (isPolicyCommand(commandConfig, event, ctx)) return;

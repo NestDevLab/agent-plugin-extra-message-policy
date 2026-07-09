@@ -288,6 +288,7 @@
             "enum": [
               "off",
               "mention",
+              "firstTag",
               "always"
             ],
             "default": "off"
@@ -438,7 +439,8 @@
   },
   "contracts": {
     "tools": [
-      "search_raw_context"
+      "search_raw_context",
+      "list_extra_message_policies"
     ],
     "agentToolResultMiddleware": [
       "pi",

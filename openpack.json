@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 2,
+  "name": "NestDevLab/agent-plugin-extra-message-policy",
+  "version": "0.1.1",
+  "provides": [
+    {
+      "type": "plugins",
+      "path": "plugins/openclaw",
+      "runtimes": [
+        "openclaw"
+      ],
+      "required": true
+    },
+    {
+      "type": "plugins",
+      "path": "plugins/hermes",
+      "runtimes": [
+        "hermes"
+      ],
+      "required": true
+    },
+    {
+      "type": "settings",
+      "path": "settings/hermes-extra-message-policy.json",
+      "runtimes": [
+        "hermes"
+      ]
+    },
+    {
+      "type": "rules",
+      "path": "rules",
+      "runtimes": [
+        "openclaw",
+        "hermes"
+      ]
+    }
+  ]
+}

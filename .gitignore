@@ -8,3 +8,7 @@ runtime/
 .syncwheel/manifests/*.local.json
 .syncwheel/wt/
 # end syncwheel managed metadata
+.agentwheel/cache/
+.agentwheel/lock.json
+*.pyc
+__pycache__/

@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { registerExtraMessagePolicy } from "../plugin-runtime.js";
 
-async function createHarness(pluginConfig = {}, runtimeConfig = {}) {
+async function createHarness(pluginConfig = {}, runtimeConfig = {}, options = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "extra-message-policy-"));
   const hooks = new Map();
   const logs = [];
@@ -46,23 +46,23 @@ async function createHarness(pluginConfig = {}, runtimeConfig = {}) {
     }
   };
 
-  const result = registerExtraMessagePolicy(api, {
-    discordSdk: {
-      buildDiscordComponentMessage(payload) {
-        builtComponentMessages.push(payload);
-        return {
-          components: [{
-            type: 17,
-            isV2: true,
-            components: [{ type: 1, payload }]
-          }]
-        };
-      },
-      registerBuiltDiscordComponentMessage(payload) {
-        builtComponentMessages.push({ registered: payload });
-      }
+  const discordSdk = options.discordSdk || {
+    buildDiscordComponentMessage(payload) {
+      builtComponentMessages.push(payload);
+      return {
+        components: [{
+          type: 17,
+          isV2: true,
+          components: [{ type: 1, payload }]
+        }]
+      };
+    },
+    registerBuiltDiscordComponentMessage(payload) {
+      builtComponentMessages.push({ registered: payload });
     }
-  });
+  };
+
+  const result = registerExtraMessagePolicy(api, { discordSdk });
 
   return {
     root,
@@ -801,6 +801,74 @@ test("golden flow: Discord runtime-shaped context suppresses unmentioned replies
   assert.equal(outbound?.cancel, undefined);
 });
 
+test("golden flow: inbound_claim suppresses unmentioned Discord before Codex can claim", async () => {
+  const jsonlPath = path.join(os.tmpdir(), `extra-policy-${Date.now()}-inbound-claim.jsonl`);
+  const harness = await createHarness({
+    defaultPolicy: { respond: true, ingestMode: "all" },
+    policies: [
+      { channelId: "claim-channel", respond: true, ingestMode: "all", requireMention: true }
+    ],
+    jsonlSink: { enabled: true, path: jsonlPath }
+  });
+
+  const event = {
+    MessageId: "msg-inbound-suppress",
+    content: "not addressed to the bot",
+    WasMentioned: false,
+    timestamp: Date.now()
+  };
+  const ctx = {
+    AccountId: "default",
+    GroupSpace: "guild-1",
+    ChannelId: "claim-channel",
+    NativeChannelId: "claim-channel",
+    OriginatingTo: "channel:claim-channel",
+    SessionKey: "agent:main:discord:channel:claim-channel",
+    SenderId: "user-1",
+    MessageId: "msg-inbound-suppress",
+    WasMentioned: false
+  };
+
+  const claim = await harness.emit("inbound_claim", event, ctx);
+
+  assert.deepEqual(claim, { handled: true });
+  assert.equal(harness.logs.some((entry) => entry.message.includes("suppressed inbound claim")), true);
+
+  const rows = await readJsonl(jsonlPath);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].source, "before_dispatch");
+  assert.equal(rows[0].policy.respond, false);
+  assert.equal(rows[0].policy.ingestMode, "all");
+  assert.equal(rows[0].policy.matched, "channelId:claim-channel");
+});
+
+test("golden flow: inbound_claim leaves slash commands available in mention-only channels", async () => {
+  const harness = await createHarness({
+    defaultPolicy: { respond: true, ingestMode: "all" },
+    policies: [
+      { channelId: "command-channel", respond: true, ingestMode: "all", requireMention: true }
+    ]
+  });
+
+  const claim = await harness.emit("inbound_claim", {
+    messageId: "msg-command",
+    content: "/status",
+    wasMentioned: false,
+    timestamp: Date.now()
+  }, {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "command-channel",
+    conversationId: "channel:command-channel",
+    sessionKey: "agent:main:discord:channel:command-channel",
+    senderId: "user-1",
+    messageId: "msg-command",
+    wasMentioned: false
+  });
+
+  assert.equal(claim, undefined);
+});
+
 test("golden flow: explicit response modes override native requireMention end-to-end", async () => {
   const harness = await createHarness({
     defaultPolicy: { respond: false, ingestMode: "none" },
@@ -1257,8 +1325,6 @@ test("golden flow: startup raw recall and registered search tool handle success 
 
 test("policy audit tool lists accessible Discord channels with effective policy", async () => {
   const originalFetch = globalThis.fetch;
-  const originalToken = process.env.TEST_DISCORD_TOKEN;
-  process.env.TEST_DISCORD_TOKEN = "test-token";
   globalThis.fetch = async (url) => {
     const textUrl = String(url);
     if (textUrl.endsWith("/guilds/111111111111111111/channels")) {
@@ -1276,7 +1342,7 @@ test("policy audit tool lists accessible Discord channels with effective policy"
             { id: "555555555555555555", name: "private-general", type: 0 },
             { id: "777777777777777777", name: "Private Category", type: 4 },
             ...overflowChannels,
-            { id: "1509999999999999999", name: "late-readable", type: 0 }
+            { id: "1999999999999999999", name: "late-readable", type: 0 }
           ]);
         }
       };
@@ -1284,7 +1350,7 @@ test("policy audit tool lists accessible Discord channels with effective policy"
     if (textUrl.endsWith("/channels/666666666666666666/messages?limit=1")) {
       return { ok: true, status: 200, async text() { return "[]"; } };
     }
-    if (textUrl.endsWith("/channels/1509999999999999999/messages?limit=1")) {
+    if (textUrl.endsWith("/channels/1999999999999999999/messages?limit=1")) {
       return { ok: true, status: 200, async text() { return "[]"; } };
     }
     if (textUrl.endsWith("/channels/777777777777777777/messages?limit=1")) {
@@ -1325,7 +1391,7 @@ test("policy audit tool lists accessible Discord channels with effective policy"
           accounts: {
             "community-bot": {
               enabled: true,
-              token: { source: "env", id: "TEST_DISCORD_TOKEN" },
+              token: { value: "test-token" },
               guilds: {
                 "111111111111111111": {
                   channels: {
@@ -1357,7 +1423,7 @@ test("policy audit tool lists accessible Discord channels with effective policy"
     const garden = accessible.details.channels.find((channel) => channel.id === "666666666666666666");
     assert.equal(garden.access, "readable");
     assert.equal(garden.policy.respond, true);
-    const late = accessible.details.channels.find((channel) => channel.id === "1509999999999999999");
+    const late = accessible.details.channels.find((channel) => channel.id === "1999999999999999999");
     assert.equal(late.access, "readable");
 
     const all = await tool.execute("tool-call", {
@@ -1376,8 +1442,6 @@ test("policy audit tool lists accessible Discord channels with effective policy"
     assert.equal(crossGuild, undefined);
   } finally {
     globalThis.fetch = originalFetch;
-    if (originalToken === undefined) delete process.env.TEST_DISCORD_TOKEN;
-    else process.env.TEST_DISCORD_TOKEN = originalToken;
   }
 });
 
@@ -1456,6 +1520,84 @@ test("golden flow: command and interactive handlers cover dashboard actions", as
   });
   assert.deepEqual(dismiss, { handled: true });
   assert.match(edits.at(-1).text, /dismissed/);
+});
+
+
+test("policy command falls back to text when Discord components fail", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "extra-policy-command-fallback-"));
+  const statePath = path.join(root, "policy-state.json");
+  const harness = await createHarness({
+    policyCommand: { statePath },
+    defaultPolicy: { respond: true, ingestMode: "responseCandidates" }
+  }, {}, {
+    discordSdk: {
+      buildDiscordComponentMessage() {
+        throw new Error("missing Discord public surface");
+      }
+    }
+  });
+
+  const result = await harness.commands[0].handler({
+    args: "status",
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "channel-1",
+    conversationId: "channel:channel-1",
+    senderId: "operator",
+    sessionKey: "agent:main:discord:channel:channel-1"
+  });
+
+  assert.match(result.text, /Message policy/);
+  assert.deepEqual(result.channelData.discord.components, []);
+});
+
+test("golden flow: firstTag promotes exact thread scope to reply always", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "extra-policy-first-tag-"));
+  const statePath = path.join(root, "policy-state.json");
+  const harness = await createHarness({
+    policyCommand: { statePath },
+    defaultPolicy: { respond: true, ingestMode: "all" }
+  });
+  const ctx = {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "thread-1",
+    parentChannelId: "parent-1",
+    conversationId: "channel:thread-1",
+    senderId: "operator",
+    sessionKey: "agent:main:discord:channel:thread-1"
+  };
+
+  await harness.commands[0].handler({ ...ctx, args: "response firstTag" });
+  let state = JSON.parse(await readFile(statePath, "utf8"));
+  assert.equal(state.scopes["discord:default:guild-1:thread-1"].policy.responseMode, "firstTag");
+
+  const plainDispatch = await harness.emit("before_dispatch", {
+    messageId: "msg-first-tag-plain",
+    content: "not addressed",
+    wasMentioned: false
+  }, { ...ctx, messageId: "msg-first-tag-plain", wasMentioned: false });
+  state = JSON.parse(await readFile(statePath, "utf8"));
+  assert.deepEqual(plainDispatch, { handled: true });
+  assert.equal(state.scopes["discord:default:guild-1:thread-1"].policy.responseMode, "firstTag");
+
+  const mentionedDispatch = await harness.emit("before_dispatch", {
+    messageId: "msg-first-tag-mentioned",
+    content: "hey bot",
+    wasMentioned: true
+  }, { ...ctx, messageId: "msg-first-tag-mentioned", wasMentioned: true });
+  state = JSON.parse(await readFile(statePath, "utf8"));
+  assert.equal(mentionedDispatch, undefined);
+  assert.equal(state.scopes["discord:default:guild-1:thread-1"].policy.responseMode, "always");
+  assert.equal(state.scopes["discord:default:guild-1:parent-1"], undefined);
+  assert.ok(harness.logs.some((entry) => entry.message.includes("first tag promoted discord:default:guild-1:thread-1")));
+
+  const unlockedDispatch = await harness.emit("before_dispatch", {
+    messageId: "msg-first-tag-unlocked",
+    content: "free response",
+    wasMentioned: false
+  }, { ...ctx, messageId: "msg-first-tag-unlocked", wasMentioned: false });
+  assert.equal(unlockedDispatch, undefined);
 });
 
 test("approval prompt handling covers persisted strings, arrays, text fields, cancel mode, and non-prompts", async () => {

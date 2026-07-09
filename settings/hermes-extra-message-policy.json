@@ -1,0 +1,22 @@
+{
+  "extra_message_policy": {
+    "enabled": true,
+    "defaultPolicy": {
+      "respond": true,
+      "ingestMode": "responseCandidates"
+    },
+    "policies": [],
+    "jsonlSink": {
+      "enabled": false,
+      "path": "memory/extra-message-policy/messages.jsonl",
+      "shardBy": "dayConversation"
+    },
+    "rawRecall": {
+      "enabled": false,
+      "appendGuidance": true,
+      "maxMatches": 12,
+      "maxContextChars": 6000,
+      "maxDays": 30
+    }
+  }
+}

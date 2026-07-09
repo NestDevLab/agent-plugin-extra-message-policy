@@ -79,6 +79,22 @@ test("runtime mention override suppresses unmentioned dispatches", () => {
   assert.equal(mentioned.mentionSatisfied, true);
 });
 
+test("runtime firstTag override waits for the first mention", () => {
+  const commandConfig = normalizePolicyCommandConfig({});
+  const result = applyRuntimeCommand(commandConfig, {}, {}, ctx, parsePolicyCommand("response first-tag"), "operator");
+  const override = resolveRuntimePolicyOverride(commandConfig, result.state, {}, ctx);
+  const unmentioned = applyRuntimePolicy({ respond: true, ingestMode: "all", matched: "config" }, override, { wasMentioned: false }, ctx);
+  const mentioned = applyRuntimePolicy({ respond: true, ingestMode: "all", matched: "config" }, override, { wasMentioned: true }, ctx);
+
+  assert.equal(result.policy.responseMode, "firstTag");
+  assert.equal(override.runtimeResponseMode, "firstTag");
+  assert.equal(unmentioned.respond, false);
+  assert.equal(unmentioned.requireMention, true);
+  assert.equal(unmentioned.mentionSatisfied, false);
+  assert.equal(mentioned.respond, true);
+  assert.equal(mentioned.mentionSatisfied, true);
+});
+
 test("fixed native mention gate applies when no dynamic policy exists", () => {
   const base = resolvePolicy(
     normalizeConfig({ defaultPolicy: { respond: true, ingestMode: "responseCandidates" } }),
@@ -145,7 +161,7 @@ test("explicit extra-message-policy response config overrides native mention gat
 });
 
 test("effective response policy matrix respects config, runtime, native gate, and mention state", async (t) => {
-  const runtimeModes = [null, "off", "mention", "always"];
+  const runtimeModes = [null, "off", "mention", "firstTag", "always"];
   const nativeModes = ["unset", "off", "on"];
   const baseRequireModes = [false, true];
   const mentionModes = [false, true];
@@ -174,7 +190,7 @@ test("effective response policy matrix respects config, runtime, native gate, an
             const runtimeOverride = runtimeMode
               ? {
                   respond: runtimeMode !== "off",
-                  requireMention: runtimeMode === "mention",
+                  requireMention: runtimeMode === "mention" || runtimeMode === "firstTag",
                   ingestMode: "all",
                   runtimeResponseMode: runtimeMode,
                   runtimeIngestMode: "all",
@@ -192,7 +208,8 @@ test("effective response policy matrix respects config, runtime, native gate, an
             const responseOff = runtimeMode === "off";
             const mentionRequired = !responseOff && (
               runtimeMode === "mention"
-              || (!runtimeMode && (baseRequireMention || nativeMode === "on"))
+              || runtimeMode === "firstTag"
+              || (!runtimeMode && baseRequireMention)
               || (runtimeMode !== "always" && baseRequireMention)
             );
             const expectedRespond = responseOff ? false : mentionRequired ? mentioned : true;
@@ -507,8 +524,10 @@ test("dashboard view exposes button callbacks for runtime and permanent policy",
   assert.equal(view.componentSpec.blocks.length, 4);
   const buttons = view.componentSpec.blocks.flatMap((block) => block.buttons);
   assert.ok(buttons.some((entry) => entry.callbackData.startsWith("policy:response:off:")));
+  assert.ok(buttons.some((entry) => entry.callbackData.startsWith("policy:response:firstTag:")));
   assert.ok(buttons.some((entry) => entry.callbackData.startsWith("policy:ingest:passive:")));
   assert.ok(buttons.some((entry) => entry.callbackData.startsWith("policy:native:on:")));
+  assert.ok(buttons.some((entry) => entry.label === "First tag"));
   assert.ok(buttons.some((entry) => entry.label === "Reply always"));
   assert.ok(buttons.some((entry) => entry.label === "Disable native gate"));
   assert.ok(buttons.every((entry) => entry.allowedUsers[0] === "operator"));
@@ -536,6 +555,44 @@ test("dashboard callback payload keeps channel scope for interaction handlers", 
   assert.equal(restoredCtx.conversationId, "thread-1");
 });
 
+test("dashboard callback payloads fit Discord custom id limits for forum threads", () => {
+  const scope = {
+    platform: "discord",
+    accountId: "default",
+    guildId: "1111111111111111111",
+    channelId: "2222222222222222222",
+    conversationId: "2222222222222222222",
+    parentChannelId: "3333333333333333333"
+  };
+  const view = buildPolicyDashboardView({
+    effectivePolicy: {
+      runtimeResponseMode: "firstTag",
+      runtimeIngestMode: "off",
+      respond: true,
+      ingestMode: "none",
+      requireMention: true,
+      runtimeMatched: "runtime-parent"
+    },
+    runtimeOverride: { responseMode: "firstTag", ingestMode: "off" },
+    scope,
+    nativeStatus: { status: "unset" },
+    actorId: "9999999999999999999"
+  });
+  const buttons = view.componentSpec.blocks.flatMap((block) => block.buttons);
+  const responseEntry = buttons.find((entry) => entry.callbackData.startsWith("policy:response:always:"));
+  const command = parsePolicyDashboardAction(responseEntry.callbackData.replace(/^policy:/, ""));
+  const restoredCtx = contextFromPolicyScope(command.scope, { target: "slash:operator" });
+
+  assert.ok(buttons.length > 0);
+  assert.ok(buttons.every((entry) => entry.callbackData.length <= 100));
+  assert.equal(command.action, "set-response");
+  assert.equal(command.value, "always");
+  assert.equal(restoredCtx.guildId, scope.guildId);
+  assert.equal(restoredCtx.channelId, scope.channelId);
+  assert.equal(restoredCtx.conversationId, scope.conversationId);
+  assert.equal(restoredCtx.parentChannelId, scope.parentChannelId);
+});
+
 test("dashboard can switch policy account without manual input", () => {
   const commandConfig = normalizePolicyCommandConfig({ policyCommand: { applyDefault: true } });
   const runtimePolicy = resolveRuntimePolicyOverride(commandConfig, {}, {}, ctx);
@@ -547,14 +604,17 @@ test("dashboard can switch policy account without manual input", () => {
     accountOptions: ["default", "secondary-bot"]
   });
   const buttons = view.componentSpec.blocks.flatMap((block) => block.buttons);
-  const accountEntry = buttons.find((entry) => entry.callbackData.startsWith("policy:account:secondary-bot:"));
+  const accountEntry = buttons.find((entry) => entry.label === "secondary-bot");
   const payload = accountEntry.callbackData.replace(/^policy:/, "");
   const command = parsePolicyDashboardAction(payload);
   const restoredCtx = contextFromPolicyScope(command.scope, ctx);
 
   assert.match(view.text, /Account.*default/);
   assert.equal(view.componentSpec.blocks.length, 5);
+  assert.ok(accountEntry.callbackData.startsWith("policy:account:_:"));
+  assert.ok(accountEntry.callbackData.length <= 100);
   assert.equal(command.action, "select-account");
+  assert.equal(command.value, "secondary-bot");
   assert.equal(restoredCtx.accountId, "secondary-bot");
   assert.equal(restoredCtx.guildId, "guild-1");
   assert.equal(restoredCtx.channelId, "channel-1");
@@ -577,10 +637,13 @@ test("dashboard account selector keeps selected account visible when there are m
   });
   const buttons = view.componentSpec.blocks.flatMap((block) => block.buttons);
   const accountButtons = buttons.filter((entry) => entry.callbackData.startsWith("policy:account:"));
+  const selectedAccount = accountButtons.find((entry) => entry.label === "zeta");
 
   assert.equal(view.componentSpec.blocks.length, 5);
-  assert.ok(accountButtons.some((entry) => entry.callbackData.startsWith("policy:account:zeta:")));
-  assert.equal(accountButtons.find((entry) => entry.callbackData.startsWith("policy:account:zeta:")).style, "success");
+  assert.ok(selectedAccount);
+  assert.ok(selectedAccount.callbackData.startsWith("policy:account:_:"));
+  assert.ok(selectedAccount.callbackData.length <= 100);
+  assert.equal(selectedAccount.style, "success");
 });
 
 test("dashboard accounts include configured discord and mention-detection accounts", () => {
@@ -783,6 +846,7 @@ test("command parser covers aliases and unknown input", () => {
   assert.deepEqual(parsePolicyCommand("show"), { action: "status" });
   assert.deepEqual(parsePolicyCommand("clear"), { action: "reset" });
   assert.deepEqual(parsePolicyCommand("reply always"), { action: "set-response", value: "always" });
+  assert.deepEqual(parsePolicyCommand("reply first-tag"), { action: "set-response", value: "first-tag" });
   assert.deepEqual(parsePolicyCommand("respond off"), { action: "set-response", value: "off" });
   assert.deepEqual(parsePolicyCommand("read all"), { action: "set-ingest", value: "all" });
   assert.deepEqual(parsePolicyCommand("require-mention on"), { action: "set-native-require", value: "on" });
@@ -800,6 +864,7 @@ test("dashboard action parser covers every action and bad scopes", () => {
   });
   assert.deepEqual(parsePolicyDashboardAction("reset:_:"), { action: "reset", scope: null });
   assert.deepEqual(parsePolicyDashboardAction("response:mention:"), { action: "set-response", value: "mention", scope: null });
+  assert.deepEqual(parsePolicyDashboardAction("response:firstTag:"), { action: "set-response", value: "firsttag", scope: null });
   assert.deepEqual(parsePolicyDashboardAction("ingest:passive:"), { action: "set-ingest", value: "passive", scope: null });
   assert.deepEqual(parsePolicyDashboardAction("native:on:"), { action: "set-native-require", value: "on", scope: null });
   assert.deepEqual(parsePolicyDashboardAction("unknown:_:"), { action: "status", scope: null });

@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { wasMentioned } from "./policy.js";
 
-const RESPONSE_MODES = Object.freeze(["off", "mention", "always"]);
+const RESPONSE_MODES = Object.freeze(["off", "mention", "firstTag", "always"]);
 const RUNTIME_INGEST_MODES = Object.freeze(["off", "passive", "responseCandidates", "all"]);
 const DASHBOARD_NAMESPACE = "policy";
 
@@ -43,18 +43,86 @@ function parentChannelValue(...values) {
 }
 
 function encodeDashboardScope(scope = {}) {
-  const compact = {
-    f: scope.platform || "",
-    a: scope.accountId || "",
-    g: scope.guildId || "",
-    c: scope.channelId || "",
-    z: scope.conversationId || "",
-    p: scope.parentChannelId || ""
-  };
-  return Buffer.from(JSON.stringify(compact), "utf8").toString("base64url");
+  const compact = [
+    "v1",
+    encodeScopePlatform(scope.platform || ""),
+    encodeScopeField(scope.accountId === "default" ? "" : scope.accountId || ""),
+    encodeScopeField(scope.guildId || ""),
+    encodeScopeField(scope.channelId || ""),
+    encodeScopeField(scope.conversationId || ""),
+    encodeScopeField(scope.parentChannelId || "")
+  ];
+  return compact.join(".");
+}
+
+function encodeScopePlatform(value) {
+  const platform = textValue(value).toLowerCase();
+  if (platform === "discord") return "d";
+  if (platform === "telegram") return "t";
+  return encodeScopeField(platform);
+}
+
+function decodeScopePlatform(value) {
+  if (value === "d") return "discord";
+  if (value === "t") return "telegram";
+  return decodeScopeField(value);
+}
+
+function encodeScopeField(value) {
+  const text = textValue(value);
+  if (!text) return "";
+  if (/^\d{10,30}$/.test(text)) return `n${BigInt(text).toString(36)}`;
+  return `s${Buffer.from(text, "utf8").toString("base64url")}`;
+}
+
+function decodeScopeField(value) {
+  const text = textValue(value);
+  if (!text) return "";
+  if (text.startsWith("n")) {
+    try {
+      return parseBase36BigInt(text.slice(1)).toString(10);
+    } catch {
+      return "";
+    }
+  }
+  if (text.startsWith("s")) {
+    try {
+      return Buffer.from(text.slice(1), "base64url").toString("utf8");
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
+
+function parseBase36BigInt(value) {
+  let result = 0n;
+  for (const char of String(value || "").toLowerCase()) {
+    const code = char.charCodeAt(0);
+    const digit = code >= 48 && code <= 57
+      ? code - 48
+      : code >= 97 && code <= 122
+        ? code - 87
+        : -1;
+    if (digit < 0 || digit >= 36) throw new Error("invalid base36 digit");
+    result = result * 36n + BigInt(digit);
+  }
+  return result;
 }
 
 function decodeDashboardScope(raw) {
+  const text = textValue(raw);
+  if (text.startsWith("v1.")) {
+    const [, platform, accountId, guildId, channelId, conversationId, parentChannelId] = text.split(".");
+    return {
+      platform: decodeScopePlatform(platform),
+      accountId: decodeScopeField(accountId) || "default",
+      guildId: decodeScopeField(guildId),
+      channelId: decodeScopeField(channelId),
+      conversationId: decodeScopeField(conversationId),
+      parentChannelId: decodeScopeField(parentChannelId)
+    };
+  }
   try {
     const parsed = JSON.parse(Buffer.from(String(raw || ""), "base64url").toString("utf8"));
     if (!parsed || typeof parsed !== "object") return null;
@@ -160,7 +228,10 @@ function platformFromContext(event = {}, ctx = {}) {
 }
 
 function normalizeResponseMode(value, fallback = DEFAULT_RUNTIME_POLICY.responseMode) {
-  return RESPONSE_MODES.includes(value) ? value : fallback;
+  if (RESPONSE_MODES.includes(value)) return value;
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "firsttag" || normalized === "first-tag" || normalized === "first_tag") return "firstTag";
+  return RESPONSE_MODES.includes(normalized) ? normalized : fallback;
 }
 
 function normalizeRuntimeIngestMode(value, fallback = DEFAULT_RUNTIME_POLICY.ingestMode) {
@@ -465,7 +536,7 @@ function runtimeToBasePolicy(runtimePolicy) {
   const ingestMode = normalizeRuntimeIngestMode(runtimePolicy.ingestMode);
   return {
     respond: responseMode !== "off",
-    requireMention: responseMode === "mention",
+    requireMention: responseMode === "mention" || responseMode === "firstTag",
     ingestMode: ingestMode === "off" ? "none" : ingestMode,
     runtimeResponseMode: responseMode,
     runtimeIngestMode: ingestMode
@@ -527,6 +598,7 @@ export function applyNativeMentionGatePolicy(policy = {}, nativeStatus = {}, eve
   }
   if (policy.runtimeResponseMode) return policy;
   if (policy.matched && policy.matched !== "default") return policy;
+  if (Object.prototype.hasOwnProperty.call(policy, "requireMention")) return policy;
   if (nativeStatus?.status !== "on" || policy.requireMention === true) return policy;
   const merged = {
     ...policy,
@@ -567,7 +639,10 @@ export function parsePolicyDashboardAction(rawPayload = "") {
   if (section === "details") return { action: "details", value: normalizedValue, scope, details: normalizedValue !== "hide" };
   if (section === "dismiss") return { action: "dismiss", scope };
   if (section === "reset") return { action: "reset", scope };
-  if (section === "account") return { action: "select-account", value, scope: { ...(scope || {}), accountId: value } };
+  if (section === "account") {
+    const accountId = value || scope?.accountId || "";
+    return { action: "select-account", value: accountId, scope: { ...(scope || {}), accountId } };
+  }
   if (section === "response") return { action: "set-response", value: normalizedValue, scope };
   if (section === "ingest") return { action: "set-ingest", value: normalizedValue, scope };
   if (section === "native") return { action: "set-native-require", value: normalizedValue, scope };
@@ -639,7 +714,7 @@ export function renderPolicyStatus(policy, scope) {
 export function renderPolicyHelp(commandName = "policy") {
   return [
     `Usage: /${commandName} status`,
-    `/${commandName} response off|mention|always|toggle`,
+    `/${commandName} response off|mention|firstTag|always|toggle`,
     `/${commandName} ingest off|passive|responseCandidates|all|toggle`,
     `/${commandName} native on|off`,
     `/${commandName} reset`
@@ -926,7 +1001,8 @@ export function renderNativeRequireMentionStatus(status) {
 }
 
 function dashboardCallback(action, value, scope) {
-  return `${DASHBOARD_NAMESPACE}:${action}:${value || "_"}:${encodeDashboardScope(scope)}`;
+  const callbackValue = action === "account" ? "_" : value || "_";
+  return `${DASHBOARD_NAMESPACE}:${action}:${callbackValue}:${encodeDashboardScope(scope)}`;
 }
 
 function dashboardButton(params) {
@@ -976,6 +1052,7 @@ function renderReplyMode(value) {
   switch (value) {
     case "off": return "Off";
     case "mention": return "Mention only";
+    case "firstTag": return "First tag";
     case "always": return "Always reply";
     default: return "Unknown";
   }
@@ -1110,6 +1187,7 @@ export function buildPolicyDashboardView({ effectivePolicy, runtimeOverride, sco
   const responseButtons = [
     makeButton({ label: "Replies off", action: "response", value: "off", style: selectedStyle(responseMode === "off") }),
     makeButton({ label: "Mention only", action: "response", value: "mention", style: selectedStyle(responseMode === "mention") }),
+    makeButton({ label: "First tag", action: "response", value: "firstTag", style: selectedStyle(responseMode === "firstTag") }),
     makeButton({ label: "Reply always", action: "response", value: "always", style: selectedStyle(responseMode === "always") })
   ];
   const ingestButtons = [
@@ -1162,7 +1240,7 @@ export function buildPolicyDashboardView({ effectivePolicy, runtimeOverride, sco
     "",
     "**Controls**",
     accountButtons.length ? "- Account: first button row." : "- Account: only one account is available.",
-    "- Reply policy: Replies off / Mention only / Reply always.",
+    "- Reply policy: Replies off / Mention only / First tag / Reply always.",
     "- Read policy: Read off / Passive / Candidates / All messages.",
     "- Native gate: turn OpenClaw requireMention on or off.",
     "- Panel: Reset panel / Refresh / Details / Dismiss.",
