@@ -1052,6 +1052,76 @@ test("golden flow: decision traces include route, policy, and parent lookup deta
   }
 });
 
+test("decision traces expose privacy-safe mention evidence for a raw Discord mention", async () => {
+  const botId = "111111111111111111";
+  const privateText = `private fixture payload <@${botId}>`;
+  const harness = await createHarness({
+    defaultPolicy: { respond: true, ingestMode: "none", requireMention: true },
+    mentionDetection: { accounts: { default: { botIds: [botId] } } }
+  }, {
+    channels: { discord: { accounts: { default: {} } } }
+  });
+
+  const dispatch = await harness.emit("before_dispatch", {
+    messageId: "msg-mention-evidence",
+    content: privateText,
+    wasMentioned: false
+  }, {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "thread-1",
+    conversationId: "channel:thread-1",
+    sessionKey: "agent:main:discord:channel:thread-1",
+    senderId: "user-1",
+    messageId: "msg-mention-evidence",
+    wasMentioned: false
+  });
+
+  assert.equal(dispatch, undefined);
+  const traceLog = harness.logs.find((entry) => entry.message.includes("decision_trace"));
+  assert.ok(traceLog, "decision trace log should be emitted");
+  const trace = JSON.parse(traceLog.message.slice(traceLog.message.indexOf("{")));
+  assert.deepEqual(trace.mentionEvidence, {
+    explicitMention: false,
+    hasText: true,
+    configuredBotIdCount: 1,
+    mentionedUserIdCount: 0,
+    replyTargetMatch: false,
+    mentionListMatch: false,
+    rawBotMentionMatch: true,
+    patternMatch: false,
+    nameMatch: false,
+    derivedMention: true
+  });
+  assert.equal(traceLog.message.includes(privateText), false);
+  assert.equal(traceLog.message.includes(botId), false);
+});
+
+test("decision traces include monotonic diagnostic sequence and timestamps across hooks", async () => {
+  const harness = await createHarness({
+    defaultPolicy: { respond: true, ingestMode: "none", requireMention: false }
+  });
+  const event = { messageId: "msg-sequence", content: "fixture" };
+  const ctx = {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "thread-1",
+    conversationId: "channel:thread-1",
+    sessionKey: "agent:main:discord:channel:thread-1",
+    senderId: "user-1",
+    messageId: "msg-sequence"
+  };
+
+  await harness.emit("inbound_claim", event, ctx);
+  await harness.emit("before_dispatch", event, ctx);
+
+  const traces = harness.logs
+    .filter((entry) => entry.message.includes("decision_trace"))
+    .map((entry) => JSON.parse(entry.message.slice(entry.message.indexOf("{"))));
+  assert.deepEqual(traces.map((trace) => trace.diagnosticSequence), [1, 2]);
+  assert.equal(traces.every((trace) => /^\d{4}-\d{2}-\d{2}T/.test(trace.observedAt)), true);
+});
+
 test("policy simulation tool evaluates captured events without sending replies", async () => {
   const harness = await createHarness({
     defaultPolicy: { respond: true, ingestMode: "all" },

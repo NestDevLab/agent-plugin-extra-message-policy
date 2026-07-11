@@ -377,6 +377,68 @@ export function deriveNativeReplyMentionFact(event = {}, ctx = {}, cfg = {}, plu
   return configuredBotIds(cfg, pluginConfig, accountId).includes(authorId) ? true : undefined;
 }
 
+function explicitMentionFact(event = {}, ctx = {}) {
+  const metadata = event?.metadata && typeof event.metadata === "object" ? event.metadata : {};
+  const ctxMetadata = ctx?.metadata && typeof ctx.metadata === "object" ? ctx.metadata : {};
+  for (const value of [
+    event.wasMentioned,
+    event.WasMentioned,
+    event.was_mentioned,
+    ctx.wasMentioned,
+    ctx.WasMentioned,
+    ctx.was_mentioned,
+    metadata.wasMentioned,
+    metadata.WasMentioned,
+    metadata.was_mentioned,
+    metadata.mentioned,
+    ctxMetadata.wasMentioned,
+    ctxMetadata.WasMentioned,
+    ctxMetadata.was_mentioned,
+    ctxMetadata.mentioned
+  ]) {
+    if (typeof value === "boolean") return value;
+  }
+  return undefined;
+}
+
+export function describeMentionEvidence(event = {}, ctx = {}, cfg = {}, pluginConfig = {}) {
+  const accountId = textValue(ctx.accountId, event.accountId, event.metadata?.accountId, "default");
+  const agentId = agentIdFromSessionKey(ctx.sessionKey, event.sessionKey);
+  const botIds = configuredBotIds(cfg, pluginConfig, accountId);
+  const mentionedIds = mentionedUserIds(event, ctx);
+  const text = messageText(event, ctx);
+  const explicitMention = explicitMentionFact(event, ctx);
+  const replyTargetMatch = deriveNativeReplyMentionFact(event, ctx, cfg, pluginConfig) === true;
+  const mentionListMatch = matchesDiscordMentionList(mentionedIds, botIds);
+  const rawBotMentionMatch = matchesDiscordBotMention(text, botIds);
+  const patternMatch = matchesConfiguredPatterns(text, configuredMentionPatterns(cfg, pluginConfig, accountId, agentId));
+  const detection = accountDetectionConfig(pluginConfig, accountId);
+  const nameMatch = matchesConfiguredName(
+    text,
+    configuredMentionNames(cfg, pluginConfig, accountId, agentId),
+    { namesRequireAt: detection.namesRequireAt }
+  );
+  const matched = replyTargetMatch || mentionListMatch || rawBotMentionMatch || patternMatch || nameMatch;
+  const derivedMention = explicitMention === true || matched
+    ? true
+    : explicitMention === false
+      ? false
+      : null;
+
+  return {
+    explicitMention: typeof explicitMention === "boolean" ? explicitMention : null,
+    hasText: Boolean(text),
+    configuredBotIdCount: botIds.length,
+    mentionedUserIdCount: mentionedIds.length,
+    replyTargetMatch,
+    mentionListMatch,
+    rawBotMentionMatch,
+    patternMatch,
+    nameMatch,
+    derivedMention
+  };
+}
+
 export function deriveMentionFact(event = {}, ctx = {}, cfg = {}, pluginConfig = {}) {
   const replyMention = deriveNativeReplyMentionFact(event, ctx, cfg, pluginConfig);
   if (typeof replyMention === "boolean") return replyMention;

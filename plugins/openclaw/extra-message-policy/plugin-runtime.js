@@ -30,6 +30,7 @@ import {
 import { buildRawRecallGuidance, createRawContextSearchTool, searchRawRecall } from "./raw-recall.js";
 import { createPolicyAuditTool } from "./policy-audit.js";
 import {
+  describeMentionEvidence,
   forceMentionedDispatchContext,
   rememberMentionFact,
   withDerivedMentionFact
@@ -811,7 +812,7 @@ function candidateRules(cfg = {}, event = {}, ctx = {}) {
     .map((rule) => describeRule(rule));
 }
 
-function decisionTrace(state, cfg, hook, event = {}, ctx = {}, policy = {}, parentLookup = {}, handled = false) {
+function decisionTrace(state, cfg, hook, event = {}, ctx = {}, policy = {}, parentLookup = {}, handled = false, mentionEvidence = null) {
   const messageId = eventMessageId(event, ctx);
   const channelId = routeChannelId(event, ctx);
   const parentChannelId = routeParentChannelId(event, ctx);
@@ -823,6 +824,8 @@ function decisionTrace(state, cfg, hook, event = {}, ctx = {}, policy = {}, pare
     channelId || "unknown"
   ].join(":");
   return {
+    observedAt: new Date().toISOString(),
+    diagnosticSequence: state.diagnosticSequence += 1,
     traceId,
     messageId: messageId || null,
     accountId: routeAccountId(event, ctx) || null,
@@ -842,6 +845,7 @@ function decisionTrace(state, cfg, hook, event = {}, ctx = {}, policy = {}, pare
     reason: traceReason(policy),
     hook,
     handled: handled || shouldSuppressResponse(policy),
+    mentionEvidence: mentionEvidence || null,
     parentLookupStatus: parentLookup?.status || "unknown",
     parentLookup: {
       status: parentLookup?.status || "unknown",
@@ -886,7 +890,8 @@ export function registerExtraMessagePolicy(api, options = {}) {
     mentionFacts: new Map(),
     discordRoutes: new Map(),
     discordChannelParents: new Map(),
-    traceCounter: 0
+    traceCounter: 0,
+    diagnosticSequence: 0
   };
 
   const resolveEffectiveDecision = async (event = {}, ctx = {}, hook = "unknown") => {
@@ -895,6 +900,12 @@ export function registerExtraMessagePolicy(api, options = {}) {
     const currentPluginConfig = resolveCurrentPluginConfig(currentConfig, api.pluginConfig || {});
     const hydrated = await withHydratedDiscordParent(state, routed.event, routed.ctx, currentConfig, api.logger);
     if (hydrated !== routed) rememberDiscordRoute(state, hydrated.event, hydrated.ctx);
+    const mentionEvidence = describeMentionEvidence(
+      hydrated.event,
+      hydrated.ctx,
+      currentConfig,
+      currentPluginConfig
+    );
     const enriched = withDerivedMentionFact(
       state,
       hydrated.event,
@@ -939,6 +950,7 @@ export function registerExtraMessagePolicy(api, options = {}) {
       event: enriched.event,
       ctx: enriched.ctx,
       policy,
+      mentionEvidence,
       parentLookup: hydrated.parentLookup || {}
     };
   };
@@ -1094,7 +1106,7 @@ export function registerExtraMessagePolicy(api, options = {}) {
       const decision = await resolveEffectiveDecision(params.event || {}, params.ctx || {}, hook);
       const handled = ["inbound_claim", "before_dispatch", "dispatch_suppress"].includes(hook)
         && shouldSuppressResponse(decision.policy);
-      const trace = decisionTrace(state, cfg, hook, decision.event, decision.ctx, decision.policy, decision.parentLookup, handled);
+      const trace = decisionTrace(state, cfg, hook, decision.event, decision.ctx, decision.policy, decision.parentLookup, handled, decision.mentionEvidence);
       return {
         content: [{ type: "text", text: formatSimulationText(trace) }],
         details: trace
@@ -1121,11 +1133,11 @@ export function registerExtraMessagePolicy(api, options = {}) {
     if (shouldSuppressResponse(decision.policy)) {
       rememberResponsePolicy(state, decision.event, decision.ctx, decision.policy);
       await ingest(api, cfg, state, "before_dispatch", decision.event, decision.ctx, decision.policy);
-      logDecisionTrace(api, decisionTrace(state, cfg, "inbound_claim", decision.event, decision.ctx, decision.policy, decision.parentLookup, true));
+      logDecisionTrace(api, decisionTrace(state, cfg, "inbound_claim", decision.event, decision.ctx, decision.policy, decision.parentLookup, true, decision.mentionEvidence));
       api.logger.info(`extra-message-policy: suppressed inbound claim for ${decision.ctx.sessionKey || decision.ctx.conversationId || decision.ctx.channelId || "unknown"}`);
       return { handled: true };
     }
-    logDecisionTrace(api, decisionTrace(state, cfg, "inbound_claim", decision.event, decision.ctx, decision.policy, decision.parentLookup, false));
+    logDecisionTrace(api, decisionTrace(state, cfg, "inbound_claim", decision.event, decision.ctx, decision.policy, decision.parentLookup, false, decision.mentionEvidence));
   }, { priority: 1000 });
 
   api.on("message_received", async (event, ctx) => {
@@ -1133,7 +1145,7 @@ export function registerExtraMessagePolicy(api, options = {}) {
     rememberDiscordRoute(state, event, ctx);
     const decision = await resolveEffectiveDecision(event, ctx, "message_received");
     await ingest(api, cfg, state, "message_received", decision.event, decision.ctx, decision.policy);
-    logDecisionTrace(api, decisionTrace(state, cfg, "message_received", decision.event, decision.ctx, decision.policy, decision.parentLookup, false));
+    logDecisionTrace(api, decisionTrace(state, cfg, "message_received", decision.event, decision.ctx, decision.policy, decision.parentLookup, false, decision.mentionEvidence));
   });
 
   api.on("before_dispatch", async (event, ctx) => {
@@ -1144,11 +1156,11 @@ export function registerExtraMessagePolicy(api, options = {}) {
     await ingest(api, cfg, state, "before_dispatch", decision.event, decision.ctx, decision.policy);
 
     if (shouldSuppressResponse(decision.policy)) {
-      logDecisionTrace(api, decisionTrace(state, cfg, "before_dispatch", decision.event, decision.ctx, decision.policy, decision.parentLookup, true));
+      logDecisionTrace(api, decisionTrace(state, cfg, "before_dispatch", decision.event, decision.ctx, decision.policy, decision.parentLookup, true, decision.mentionEvidence));
       api.logger.info(`extra-message-policy: suppressed response for ${decision.ctx.sessionKey || decision.ctx.conversationId || decision.ctx.channelId || "unknown"}`);
       return { handled: true };
     }
-    logDecisionTrace(api, decisionTrace(state, cfg, "before_dispatch", decision.event, decision.ctx, decision.policy, decision.parentLookup, false));
+    logDecisionTrace(api, decisionTrace(state, cfg, "before_dispatch", decision.event, decision.ctx, decision.policy, decision.parentLookup, false, decision.mentionEvidence));
   });
 
   api.on("reply_dispatch", async (event) => {
@@ -1156,11 +1168,11 @@ export function registerExtraMessagePolicy(api, options = {}) {
     if (isPolicyCommand(commandConfig, dispatchPolicyEvent(dispatchCtx), dispatchPolicyContext(dispatchCtx))) return;
     const decision = await resolveEffectiveDecision(dispatchPolicyEvent(dispatchCtx), dispatchPolicyContext(dispatchCtx), "reply_dispatch");
     if (!shouldForceReplyContext(decision.policy)) {
-      logDecisionTrace(api, decisionTrace(state, cfg, "reply_dispatch", decision.event, decision.ctx, decision.policy, decision.parentLookup, false));
+      logDecisionTrace(api, decisionTrace(state, cfg, "reply_dispatch", decision.event, decision.ctx, decision.policy, decision.parentLookup, false, decision.mentionEvidence));
       return;
     }
     forceMentionedDispatchContext(dispatchCtx);
-    logDecisionTrace(api, decisionTrace(state, cfg, "reply_dispatch", decision.event, decision.ctx, decision.policy, decision.parentLookup, false));
+    logDecisionTrace(api, decisionTrace(state, cfg, "reply_dispatch", decision.event, decision.ctx, decision.policy, decision.parentLookup, false, decision.mentionEvidence));
     api.logger.info(`extra-message-policy: forced reply context for ${dispatchCtx.SessionKey || dispatchCtx.OriginatingTo || dispatchCtx.To || "unknown"}`);
   });
 
