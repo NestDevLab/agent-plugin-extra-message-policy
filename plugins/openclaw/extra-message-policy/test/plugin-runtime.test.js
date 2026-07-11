@@ -84,6 +84,129 @@ async function readJsonl(filePath) {
   return raw.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
 }
 
+test("derived bot mention overrides explicit false mention fact before dispatch", async () => {
+  const botId = "111111111111111111";
+  const harness = await createHarness({
+    defaultPolicy: { respond: true, ingestMode: "responseCandidates", requireMention: true },
+    mentionDetection: { accounts: { default: { botIds: [botId] } } }
+  }, {
+    channels: { discord: { accounts: { default: {} } } }
+  });
+
+  const event = {
+    messageId: "msg-explicit-false",
+    content: `<@${botId}>`,
+    wasMentioned: false
+  };
+  const ctx = {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "thread-1",
+    conversationId: "channel:thread-1",
+    sessionKey: "agent:main:discord:channel:thread-1",
+    senderId: "user-1",
+    messageId: "msg-explicit-false"
+  };
+
+  const dispatch = await harness.emit("before_dispatch", event, ctx);
+  assert.equal(dispatch, undefined);
+});
+
+test("Discord mentions array overrides explicit false mention fact without content", async () => {
+  const botId = "111111111111111111";
+  const harness = await createHarness({
+    defaultPolicy: { respond: true, ingestMode: "responseCandidates", requireMention: true },
+    mentionDetection: { accounts: { default: { botIds: [botId] } } }
+  }, {
+    channels: { discord: { accounts: { default: {} } } }
+  });
+
+  const event = {
+    messageId: "msg-mentions-array",
+    wasMentioned: false,
+    metadata: { message: { mentions: [{ id: botId }] } }
+  };
+  const ctx = {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "thread-1",
+    conversationId: "channel:thread-1",
+    sessionKey: "agent:main:discord:channel:thread-1",
+    senderId: "user-1",
+    messageId: "msg-mentions-array"
+  };
+
+  const dispatch = await harness.emit("before_dispatch", event, ctx);
+  assert.equal(dispatch, undefined);
+});
+
+test("runtime plugin config mention detection overrides explicit false mention fact", async () => {
+  const botId = "111111111111111111";
+  const harness = await createHarness({
+    defaultPolicy: { respond: true, ingestMode: "responseCandidates", requireMention: true }
+  }, {
+    plugins: {
+      entries: {
+        "extra-message-policy": {
+          config: {
+            mentionDetection: { accounts: { default: { botIds: [botId] } } }
+          }
+        }
+      }
+    },
+    channels: { discord: { accounts: { default: {} } } }
+  });
+
+  const dispatch = await harness.emit("before_dispatch", {
+    messageId: "msg-runtime-config-mention",
+    content: `<@${botId}>`,
+    wasMentioned: false
+  }, {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "thread-1",
+    conversationId: "channel:thread-1",
+    sessionKey: "agent:main:discord:channel:thread-1",
+    senderId: "user-1",
+    messageId: "msg-runtime-config-mention"
+  });
+
+  assert.equal(dispatch, undefined);
+});
+
+test("recalled true mention overrides reduced dispatch false", async () => {
+  const botId = "111111111111111111";
+  const harness = await createHarness({
+    defaultPolicy: { respond: true, ingestMode: "responseCandidates", requireMention: true },
+    mentionDetection: { accounts: { default: { botIds: [botId] } } }
+  }, {
+    channels: { discord: { accounts: { default: {} } } }
+  });
+
+  const ctx = {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "thread-1",
+    conversationId: "channel:thread-1",
+    sessionKey: "agent:main:discord:channel:thread-1",
+    senderId: "user-1"
+  };
+
+  const claim = await harness.emit("inbound_claim", {
+    messageId: "msg-recalled-claim",
+    content: `<@${botId}> addressed turn`,
+    wasMentioned: false
+  }, { ...ctx, messageId: "msg-recalled-claim" });
+  assert.equal(claim, undefined);
+
+  const dispatch = await harness.emit("before_dispatch", {
+    messageId: "msg-recalled-dispatch",
+    wasMentioned: false
+  }, { ...ctx, messageId: "msg-recalled-dispatch" });
+
+  assert.equal(dispatch, undefined);
+});
+
 test("golden flow: child Discord thread overrides suppressed parent policy", async () => {
   const jsonlPath = path.join(os.tmpdir(), `extra-policy-${Date.now()}-thread.jsonl`);
   const harness = await createHarness({
