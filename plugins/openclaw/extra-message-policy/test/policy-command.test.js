@@ -752,12 +752,47 @@ test("native disabled channel suppresses runtime always reply", () => {
   const effective = applyNativeMentionGatePolicy(runtimePolicy, {
     enabled: false,
     status: "off",
-    source: "channels.discord.accounts.community-bot.guilds.788063059926712341.channels.123.enabled"
+    source: "channels.discord.accounts.community-bot.guilds.111111111111111111.channels.123.enabled"
   }, { wasMentioned: true }, ctx);
 
   assert.equal(effective.respond, false);
   assert.equal(effective.nativeEnabledGate, true);
   assert.match(effective.matched, /native-disabled/);
+});
+
+test("native config ignores Discord platform channel label when resolving zone", () => {
+  const nativeStatus = resolveNativeRequireMentionStatus({
+    accountId: "project-bot",
+    guildId: "111111111111111111",
+    channelId: "discord",
+    conversationId: "channel:222222222222222222",
+    metadata: {
+      guildId: "111111111111111111",
+      to: "channel:222222222222222222"
+    }
+  }, {
+    channels: {
+      discord: {
+        accounts: {
+          "project-bot": {
+            guilds: {
+              "111111111111111111": {
+                channels: {
+                  "*": { enabled: false, requireMention: true },
+                  "222222222222222222": { enabled: true, requireMention: false }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  assert.equal(nativeStatus.enabled, true);
+  assert.equal(nativeStatus.status, "off");
+  assert.equal(nativeStatus.target.zoneId, "222222222222222222");
+  assert.match(nativeStatus.source, /222222222222222222\.requireMention$/);
 });
 
 test("subthreads inherit parent panel override until overwritten", () => {
@@ -990,7 +1025,7 @@ test("native enabled status treats disabled wildcard as hard off unless channel 
         accounts: {
           "community-bot": {
             guilds: {
-              "788063059926712341": {
+              "111111111111111111": {
                 channels: {
                   "*": { enabled: false, requireMention: true },
                   "allowed": { enabled: true, requireMention: false }
@@ -1005,13 +1040,13 @@ test("native enabled status treats disabled wildcard as hard off unless channel 
 
   const blocked = resolveNativeRequireMentionStatus({
     accountId: "community-bot",
-    guildId: "788063059926712341",
+    guildId: "111111111111111111",
     channelId: "other",
     provider: "discord"
   }, cfg);
   const allowed = resolveNativeRequireMentionStatus({
     accountId: "community-bot",
-    guildId: "788063059926712341",
+    guildId: "111111111111111111",
     channelId: "allowed",
     provider: "discord"
   }, cfg);

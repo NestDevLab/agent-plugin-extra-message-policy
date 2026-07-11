@@ -153,7 +153,7 @@ test("golden flow: child Discord thread inherits parent policy from thread_paren
     guildId: "guild-1",
     channelId: "thread-dynamic",
     conversationId: "channel:thread-dynamic",
-    sessionKey: "agent:example-staff:discord:channel:thread-dynamic",
+    sessionKey: "agent:support-bot:discord:channel:thread-dynamic",
     senderId: "user-1",
     messageId: "msg-parent-alias"
   };
@@ -176,26 +176,26 @@ test("golden flow: child Discord thread inherits parent policy from core parent 
   const harness = await createHarness({
     defaultPolicy: { respond: false, ingestMode: "none" },
     policies: [
-      { channelId: "1497843035126632548", guildId: "843190729793863690", accountId: "default", respond: true, ingestMode: "all" }
+      { channelId: "222222222222222222", guildId: "111111111111111111", accountId: "default", respond: true, ingestMode: "all" }
     ],
     jsonlSink: { enabled: true, path: jsonlPath }
   });
 
   const event = {
-    messageId: "1111111111111111111",
-    content: "@Bot_Example ping",
+    messageId: "444444444444444444",
+    content: "@Support Bot ping",
     timestamp: Date.now()
   };
   const ctx = {
     AccountId: "default",
-    GroupSpace: "843190729793863690",
-    NativeChannelId: "1222222222222222222",
-    OriginatingTo: "channel:1222222222222222222",
-    SessionKey: "agent:example-staff:discord:channel:1222222222222222222",
-    ParentSessionKey: "agent:example-staff:discord:channel:1497843035126632548",
-    ModelParentSessionKey: "agent:example-staff:discord:channel:1497843035126632548",
-    SenderId: "108617457836539904",
-    MessageSid: "1111111111111111111"
+    GroupSpace: "111111111111111111",
+    NativeChannelId: "333333333333333333",
+    OriginatingTo: "channel:333333333333333333",
+    SessionKey: "agent:support-bot:discord:channel:333333333333333333",
+    ParentSessionKey: "agent:support-bot:discord:channel:222222222222222222",
+    ModelParentSessionKey: "agent:support-bot:discord:channel:222222222222222222",
+    SenderId: "operator-user",
+    MessageSid: "444444444444444444"
   };
 
   await harness.emit("message_received", event, ctx);
@@ -206,7 +206,7 @@ test("golden flow: child Discord thread inherits parent policy from core parent 
   const rows = await readJsonl(jsonlPath);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].policy.respond, true);
-  assert.equal(rows[0].policy.matched, "channelId:1497843035126632548,guildId:843190729793863690,accountId:default");
+  assert.equal(rows[0].policy.matched, "channelId:222222222222222222,guildId:111111111111111111,accountId:default");
 });
 
 test("golden flow: Discord thread hydrates missing parent channel before policy resolution", async () => {
@@ -215,15 +215,15 @@ test("golden flow: Discord thread hydrates missing parent channel before policy 
   let fetchCount = 0;
   globalThis.fetch = async (url) => {
     fetchCount += 1;
-    assert.equal(String(url), "https://discord.com/api/v10/channels/1333333333333333333");
+    assert.equal(String(url), "https://discord.com/api/v10/channels/555555555555555555");
     return {
       ok: true,
       async json() {
         return {
-          id: "1333333333333333333",
+          id: "555555555555555555",
           type: 11,
-          guild_id: "843190729793863690",
-          parent_id: "1497843035126632548"
+          guild_id: "111111111111111111",
+          parent_id: "222222222222222222"
         };
       }
     };
@@ -233,7 +233,7 @@ test("golden flow: Discord thread hydrates missing parent channel before policy 
     const harness = await createHarness({
       defaultPolicy: { respond: false, ingestMode: "none" },
       policies: [
-        { channelId: "1497843035126632548", guildId: "843190729793863690", accountId: "default", respond: true, ingestMode: "all" }
+        { channelId: "222222222222222222", guildId: "111111111111111111", accountId: "default", respond: true, ingestMode: "all" }
       ],
       jsonlSink: { enabled: true, path: jsonlPath }
     }, {
@@ -249,23 +249,23 @@ test("golden flow: Discord thread hydrates missing parent channel before policy 
     });
 
     const event = {
-      messageId: "1444444444444444444",
-      content: "<@1497722008740434000> Following up",
+      messageId: "666666666666666666",
+      content: "<@777777777777777777> Following up",
       metadata: {
         provider: "discord",
-        guildId: "843190729793863690",
-        channelId: "1333333333333333333"
+        guildId: "111111111111111111",
+        channelId: "555555555555555555"
       },
       timestamp: Date.now()
     };
     const ctx = {
       accountId: "default",
-      guildId: "843190729793863690",
-      channelId: "1333333333333333333",
-      conversationId: "channel:1333333333333333333",
-      sessionKey: "agent:example-staff:discord:channel:1333333333333333333",
-      senderId: "251803844307189761",
-      messageId: "1444444444444444444"
+      guildId: "111111111111111111",
+      channelId: "555555555555555555",
+      conversationId: "channel:555555555555555555",
+      sessionKey: "agent:support-bot:discord:channel:555555555555555555",
+      senderId: "888888888888888888",
+      messageId: "666666666666666666"
     };
 
     await harness.emit("message_received", event, ctx);
@@ -277,7 +277,7 @@ test("golden flow: Discord thread hydrates missing parent channel before policy 
     const rows = await readJsonl(jsonlPath);
     assert.equal(rows.length, 1);
     assert.equal(rows[0].policy.respond, true);
-    assert.equal(rows[0].policy.matched, "channelId:1497843035126632548,guildId:843190729793863690,accountId:default");
+    assert.equal(rows[0].policy.matched, "channelId:222222222222222222,guildId:111111111111111111,accountId:default");
   } finally {
     globalThis.fetch = previousFetch;
   }
@@ -326,14 +326,14 @@ test("Discord guild-wide ingest policy suppresses before dispatch without cancel
   const harness = await createHarness({
     defaultPolicy: { respond: true, ingestMode: "all" },
     policies: [
-      { accountId: "community-bot", guildId: "788063059926712341", respond: false, ingestMode: "all" },
-      { accountId: "community-bot", channelId: "1555555555555555555", respond: true, ingestMode: "all" }
+      { accountId: "community-bot", guildId: "111111111111111111", respond: false, ingestMode: "all" },
+      { accountId: "community-bot", channelId: "222222222222222222", respond: true, ingestMode: "all" }
     ]
   });
 
   const suppressed = await harness.emit("message_sending", { content: "reply" }, {
     accountId: "community-bot",
-    guildId: "788063059926712341",
+    guildId: "111111111111111111",
     channelId: "999999999999999999",
     conversationId: "channel:999999999999999999",
     sessionKey: "agent:community-bot:discord:channel:999999999999999999",
@@ -342,10 +342,10 @@ test("Discord guild-wide ingest policy suppresses before dispatch without cancel
 
   const allowed = await harness.emit("message_sending", { content: "reply" }, {
     accountId: "community-bot",
-    guildId: "788063059926712341",
-    channelId: "1555555555555555555",
-    conversationId: "channel:1555555555555555555",
-    sessionKey: "agent:community-bot:discord:channel:1555555555555555555",
+    guildId: "111111111111111111",
+    channelId: "222222222222222222",
+    conversationId: "channel:222222222222222222",
+    sessionKey: "agent:community-bot:discord:channel:222222222222222222",
     senderId: "user-1"
   });
 
@@ -357,48 +357,48 @@ test("Discord dispatch reuses remembered guild route when dispatch context omits
   const harness = await createHarness({
     defaultPolicy: { respond: true, ingestMode: "all" },
     policies: [
-      { accountId: "community-bot", guildId: "788063059926712341", respond: false, ingestMode: "all" },
-      { accountId: "community-bot", channelId: "1555555555555555555", respond: true, ingestMode: "all" }
+      { accountId: "community-bot", guildId: "111111111111111111", respond: false, ingestMode: "all" },
+      { accountId: "community-bot", channelId: "222222222222222222", respond: true, ingestMode: "all" }
     ]
   });
 
   const receivedEvent = {
-    messageId: "paladin-1",
-    content: "chromie.. i can see you typing...",
+    messageId: "msg-remembered-route",
+    content: "bot.. i can see you typing...",
     metadata: {
-      guildId: "788063059926712341",
-      channelId: "825732321168457769"
+      guildId: "111111111111111111",
+      channelId: "333333333333333333"
     }
   };
   const receivedCtx = {
     accountId: "community-bot",
-    guildId: "788063059926712341",
-    channelId: "825732321168457769",
-    conversationId: "channel:825732321168457769",
-    sessionKey: "agent:community-bot:discord:channel:825732321168457769",
+    guildId: "111111111111111111",
+    channelId: "333333333333333333",
+    conversationId: "channel:333333333333333333",
+    sessionKey: "agent:community-bot:discord:channel:333333333333333333",
     senderId: "user-1",
-    messageId: "paladin-1"
+    messageId: "msg-remembered-route"
   };
   const dispatchCtxWithoutGuild = {
     accountId: "community-bot",
-    channelId: "825732321168457769",
-    conversationId: "channel:825732321168457769",
-    sessionKey: "agent:community-bot:discord:channel:825732321168457769",
+    channelId: "333333333333333333",
+    conversationId: "channel:333333333333333333",
+    sessionKey: "agent:community-bot:discord:channel:333333333333333333",
     senderId: "user-1",
-    messageId: "paladin-1"
+    messageId: "msg-remembered-route"
   };
 
   await harness.emit("inbound_claim", receivedEvent, receivedCtx);
   await harness.emit("message_received", receivedEvent, receivedCtx);
   const dispatch = await harness.emit("before_dispatch", {
-    messageId: "paladin-1",
-    content: "chromie.. i can see you typing..."
+    messageId: "msg-remembered-route",
+    content: "bot.. i can see you typing..."
   }, dispatchCtxWithoutGuild);
   const outbound = await harness.emit("message_sending", { content: "reply" }, {
     accountId: "community-bot",
-    channelId: "825732321168457769",
-    conversationId: "channel:825732321168457769",
-    sessionKey: "agent:community-bot:discord:channel:825732321168457769",
+    channelId: "333333333333333333",
+    conversationId: "channel:333333333333333333",
+    sessionKey: "agent:community-bot:discord:channel:333333333333333333",
     senderId: "user-1"
   });
 
@@ -656,7 +656,7 @@ test("golden flow: Discord reply to bot satisfies requireMention policy", async 
     mentionDetection: {
       accounts: {
         default: {
-          botIds: ["1494581796120301598"]
+          botIds: ["111122223333444455"]
         }
       }
     }
@@ -667,7 +667,7 @@ test("golden flow: Discord reply to bot satisfies requireMention policy", async 
     content: "yes, continue",
     metadata: {
       referenced_message: {
-        author: { id: "1494581796120301598" }
+        author: { id: "111122223333444455" }
       }
     },
     timestamp: Date.now()
@@ -882,7 +882,7 @@ test("golden flow: explicit response modes override native requireMention end-to
       discord: {
         accounts: {
           default: {
-            botUserId: "1494581796120301598",
+            botUserId: "111122223333444455",
             guilds: {
               "guild-1": {
                 channels: {
@@ -925,13 +925,13 @@ test("golden flow: explicit response modes override native requireMention end-to
     },
     {
       suffix: "mention",
-      event: { content: "<@1494581796120301598> explicitly disabled", wasMentioned: true }
+      event: { content: "<@111122223333444455> explicitly disabled", wasMentioned: true }
     },
     {
       suffix: "reply",
       event: {
         content: "reply to bot but explicitly disabled",
-        metadata: { referenced_message: { author: { id: "1494581796120301598" } } }
+        metadata: { referenced_message: { author: { id: "111122223333444455" } } }
       }
     }
   ]) {
@@ -986,7 +986,7 @@ test("golden flow: explicit response modes override native requireMention end-to
   const mentionReplyDispatch = await harness.emit("before_dispatch", {
     messageId: "msg-mention-reply",
     content: "reply to bot in plugin mention mode",
-    metadata: { referenced_message: { author: { id: "1494581796120301598" } } },
+    metadata: { referenced_message: { author: { id: "111122223333444455" } } },
     timestamp: Date.now()
   }, mentionReplyCtx);
   const mentionReplyOutbound = await harness.emit("message_sending", { content: "reply" }, mentionReplyCtx);
@@ -999,8 +999,8 @@ test("golden flow: guild-scoped Discord policy suppresses rawGuildId runtime con
   const harness = await createHarness({
     defaultPolicy: { respond: true, ingestMode: "all" },
     policies: [
-      { accountId: "community-bot", guildId: "788063059926712341", respond: false, ingestMode: "all" },
-      { accountId: "community-bot", channelId: "1555555555555555555", respond: true, ingestMode: "all" }
+      { accountId: "community-bot", guildId: "111111111111111111", respond: false, ingestMode: "all" },
+      { accountId: "community-bot", channelId: "222222222222222222", respond: true, ingestMode: "all" }
     ],
     jsonlSink: { enabled: true, path: jsonlPath }
   });
@@ -1012,10 +1012,10 @@ test("golden flow: guild-scoped Discord policy suppresses rawGuildId runtime con
   };
   const ctx = {
     accountId: "community-bot",
-    rawGuildId: "788063059926712341",
-    channelId: "1666666666666666666",
-    conversationId: "channel:1666666666666666666",
-    sessionKey: "agent:community-bot:discord:channel:1666666666666666666",
+    rawGuildId: "111111111111111111",
+    channelId: "444444444444444444",
+    conversationId: "channel:444444444444444444",
+    sessionKey: "agent:community-bot:discord:channel:444444444444444444",
     senderId: "user-1",
     messageId: "msg-raw-guild-suppress"
   };
@@ -1030,7 +1030,7 @@ test("golden flow: guild-scoped Discord policy suppresses rawGuildId runtime con
   assert.equal(rows.length, 1);
   assert.equal(rows[0].policy.respond, false);
   assert.equal(rows[0].policy.ingestMode, "all");
-  assert.equal(rows[0].policy.matched, "guildId:788063059926712341,accountId:community-bot");
+  assert.equal(rows[0].policy.matched, "guildId:111111111111111111,accountId:community-bot");
 });
 
 test("golden flow: accountless guild policy suppresses Discord contexts missing account id", async () => {
@@ -1038,22 +1038,22 @@ test("golden flow: accountless guild policy suppresses Discord contexts missing 
   const harness = await createHarness({
     defaultPolicy: { respond: true, ingestMode: "all" },
     policies: [
-      { guildId: "788063059926712341", respond: false, ingestMode: "all" },
-      { channelId: "1555555555555555555", respond: true, ingestMode: "all" }
+      { guildId: "111111111111111111", respond: false, ingestMode: "all" },
+      { channelId: "222222222222222222", respond: true, ingestMode: "all" }
     ],
     jsonlSink: { enabled: true, path: jsonlPath }
   });
 
   const event = {
     MessageId: "msg-accountless-guild-suppress",
-    content: "hey chromie",
+    content: "hey bot",
     timestamp: Date.now()
   };
   const ctx = {
-    rawGuildId: "788063059926712341",
-    channelId: "1284884380661055568",
-    conversationId: "channel:1284884380661055568",
-    sessionKey: "agent:community-bot:discord:channel:1284884380661055568",
+    rawGuildId: "111111111111111111",
+    channelId: "555555555555555555",
+    conversationId: "channel:555555555555555555",
+    sessionKey: "agent:community-bot:discord:channel:555555555555555555",
     senderId: "user-1",
     messageId: "msg-accountless-guild-suppress"
   };
@@ -1067,7 +1067,7 @@ test("golden flow: accountless guild policy suppresses Discord contexts missing 
   const rows = await readJsonl(jsonlPath);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].policy.respond, false);
-  assert.equal(rows[0].policy.matched, "guildId:788063059926712341");
+  assert.equal(rows[0].policy.matched, "guildId:111111111111111111");
 });
 
 test("golden flow: runtime mention fact survives uppercase inbound fields", async () => {
@@ -1327,7 +1327,7 @@ test("policy audit tool lists accessible Discord channels with effective policy"
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url) => {
     const textUrl = String(url);
-    if (textUrl.endsWith("/guilds/788063059926712341/channels")) {
+    if (textUrl.endsWith("/guilds/111111111111111111/channels")) {
       return {
         ok: true,
         status: 200,
@@ -1338,39 +1338,39 @@ test("policy audit tool lists accessible Discord channels with effective policy"
             type: 0
           }));
           return JSON.stringify([
-            { id: "1777777777777777777", name: "chromie-garden", type: 0 },
-            { id: "1284884380661055568", name: "gm-general", type: 0 },
-            { id: "1888888888888888888", name: "Chromie's Citadel", type: 4 },
+            { id: "666666666666666666", name: "community-garden", type: 0 },
+            { id: "555555555555555555", name: "private-general", type: 0 },
+            { id: "777777777777777777", name: "Private Category", type: 4 },
             ...overflowChannels,
             { id: "1999999999999999999", name: "late-readable", type: 0 }
           ]);
         }
       };
     }
-    if (textUrl.endsWith("/channels/1777777777777777777/messages?limit=1")) {
+    if (textUrl.endsWith("/channels/666666666666666666/messages?limit=1")) {
       return { ok: true, status: 200, async text() { return "[]"; } };
     }
     if (textUrl.endsWith("/channels/1999999999999999999/messages?limit=1")) {
       return { ok: true, status: 200, async text() { return "[]"; } };
     }
-    if (textUrl.endsWith("/channels/1888888888888888888/messages?limit=1")) {
+    if (textUrl.endsWith("/channels/777777777777777777/messages?limit=1")) {
       return { ok: true, status: 200, async text() { return "[]"; } };
     }
-    if (textUrl.endsWith("/channels/1497843035126632548")) {
+    if (textUrl.endsWith("/channels/222222222222222222")) {
       return {
         ok: true,
         status: 200,
         async text() {
           return JSON.stringify({
-            id: "1497843035126632548",
+            id: "222222222222222222",
             name: "other-guild-channel",
             type: 0,
-            guild_id: "2111111111111111110"
+            guild_id: "999999999999999999"
           });
         }
       };
     }
-    if (textUrl.endsWith("/channels/1284884380661055568/messages?limit=1")) {
+    if (textUrl.endsWith("/channels/555555555555555555/messages?limit=1")) {
       return { ok: false, status: 403, async text() { return "{}"; } };
     }
     return { ok: false, status: 404, async text() { return "{}"; } };
@@ -1380,9 +1380,9 @@ test("policy audit tool lists accessible Discord channels with effective policy"
     const harness = await createHarness({
       defaultPolicy: { respond: true, ingestMode: "all" },
       policies: [
-        { guildId: "788063059926712341", respond: false, ingestMode: "all" },
-        { channelId: "1777777777777777777", respond: true, ingestMode: "all" },
-        { channelId: "1497843035126632548", respond: true, ingestMode: "all" }
+        { guildId: "111111111111111111", respond: false, ingestMode: "all" },
+        { channelId: "666666666666666666", respond: true, ingestMode: "all" },
+        { channelId: "222222222222222222", respond: true, ingestMode: "all" }
       ]
     }, {
       channels: {
@@ -1393,11 +1393,11 @@ test("policy audit tool lists accessible Discord channels with effective policy"
               enabled: true,
               token: { value: "test-token" },
               guilds: {
-                "788063059926712341": {
+                "111111111111111111": {
                   channels: {
                     "*": { enabled: true, requireMention: false },
-                    "1284884380661055568": { enabled: false, requireMention: true },
-                    "1777777777777777777": { enabled: true, requireMention: false }
+                    "555555555555555555": { enabled: false, requireMention: true },
+                    "666666666666666666": { enabled: true, requireMention: false }
                   }
                 }
               }
@@ -1410,17 +1410,17 @@ test("policy audit tool lists accessible Discord channels with effective policy"
     const tool = harness.tools.find((entry) => entry.options?.name === "list_extra_message_policies").factory({});
     const accessible = await tool.execute("tool-call", {
       accountId: "community-bot",
-      guildId: "788063059926712341"
+      guildId: "111111111111111111"
     });
-    assert.match(accessible.content[0].text, /chromie-garden/);
+    assert.match(accessible.content[0].text, /community-garden/);
     assert.match(accessible.content[0].text, /late-readable/);
-    assert.doesNotMatch(accessible.content[0].text, /gm-general/);
-    assert.doesNotMatch(accessible.content[0].text, /Chromie's Citadel/);
+    assert.doesNotMatch(accessible.content[0].text, /private-general/);
+    assert.doesNotMatch(accessible.content[0].text, /Private Category/);
     assert.doesNotMatch(accessible.content[0].text, /other-guild-channel/);
     assert.equal(accessible.details.totalCandidates, 260);
     assert.equal(accessible.details.totalGuildCandidates, 259);
     assert.equal(accessible.details.channels.length, 2);
-    const garden = accessible.details.channels.find((channel) => channel.id === "1777777777777777777");
+    const garden = accessible.details.channels.find((channel) => channel.id === "666666666666666666");
     assert.equal(garden.access, "readable");
     assert.equal(garden.policy.respond, true);
     const late = accessible.details.channels.find((channel) => channel.id === "1999999999999999999");
@@ -1428,17 +1428,17 @@ test("policy audit tool lists accessible Discord channels with effective policy"
 
     const all = await tool.execute("tool-call", {
       accountId: "community-bot",
-      guildId: "788063059926712341",
+      guildId: "111111111111111111",
       onlyAccessible: false
     });
-    const gm = all.details.channels.find((channel) => channel.id === "1284884380661055568");
-    assert.equal(gm.access, "no_access");
-    assert.equal(gm.native.enabled, false);
-    assert.equal(gm.policy.respond, false);
-    assert.equal(gm.accountlessPolicy.respond, false);
-    const category = all.details.channels.find((channel) => channel.id === "1888888888888888888");
+    const privateChannel = all.details.channels.find((channel) => channel.id === "555555555555555555");
+    assert.equal(privateChannel.access, "no_access");
+    assert.equal(privateChannel.native.enabled, false);
+    assert.equal(privateChannel.policy.respond, false);
+    assert.equal(privateChannel.accountlessPolicy.respond, false);
+    const category = all.details.channels.find((channel) => channel.id === "777777777777777777");
     assert.equal(category.access, "not_message_channel");
-    const crossGuild = all.details.channels.find((channel) => channel.id === "1497843035126632548");
+    const crossGuild = all.details.channels.find((channel) => channel.id === "222222222222222222");
     assert.equal(crossGuild, undefined);
   } finally {
     globalThis.fetch = originalFetch;
