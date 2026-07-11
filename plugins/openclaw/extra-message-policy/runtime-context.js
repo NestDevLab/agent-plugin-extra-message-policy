@@ -1,3 +1,5 @@
+import { wasMentioned } from "./policy.js";
+
 function mentionFactKeys(event = {}, ctx = {}) {
   const keys = new Set();
   const sessionKey = event.sessionKey || event.SessionKey || ctx.sessionKey || ctx.SessionKey;
@@ -377,37 +379,13 @@ export function deriveNativeReplyMentionFact(event = {}, ctx = {}, cfg = {}, plu
   return configuredBotIds(cfg, pluginConfig, accountId).includes(authorId) ? true : undefined;
 }
 
-function explicitMentionFact(event = {}, ctx = {}) {
-  const metadata = event?.metadata && typeof event.metadata === "object" ? event.metadata : {};
-  const ctxMetadata = ctx?.metadata && typeof ctx.metadata === "object" ? ctx.metadata : {};
-  for (const value of [
-    event.wasMentioned,
-    event.WasMentioned,
-    event.was_mentioned,
-    ctx.wasMentioned,
-    ctx.WasMentioned,
-    ctx.was_mentioned,
-    metadata.wasMentioned,
-    metadata.WasMentioned,
-    metadata.was_mentioned,
-    metadata.mentioned,
-    ctxMetadata.wasMentioned,
-    ctxMetadata.WasMentioned,
-    ctxMetadata.was_mentioned,
-    ctxMetadata.mentioned
-  ]) {
-    if (typeof value === "boolean") return value;
-  }
-  return undefined;
-}
-
-export function describeMentionEvidence(event = {}, ctx = {}, cfg = {}, pluginConfig = {}) {
+export function describeMentionEvidence(event = {}, ctx = {}, cfg = {}, pluginConfig = {}, options = {}) {
   const accountId = textValue(ctx.accountId, event.accountId, event.metadata?.accountId, "default");
   const agentId = agentIdFromSessionKey(ctx.sessionKey, event.sessionKey);
   const botIds = configuredBotIds(cfg, pluginConfig, accountId);
   const mentionedIds = mentionedUserIds(event, ctx);
   const text = messageText(event, ctx);
-  const explicitMention = explicitMentionFact(event, ctx);
+  const explicitMention = wasMentioned(event, ctx, {});
   const replyTargetMatch = deriveNativeReplyMentionFact(event, ctx, cfg, pluginConfig) === true;
   const mentionListMatch = matchesDiscordMentionList(mentionedIds, botIds);
   const rawBotMentionMatch = matchesDiscordBotMention(text, botIds);
@@ -418,12 +396,30 @@ export function describeMentionEvidence(event = {}, ctx = {}, cfg = {}, pluginCo
     configuredMentionNames(cfg, pluginConfig, accountId, agentId),
     { namesRequireAt: detection.namesRequireAt }
   );
-  const matched = replyTargetMatch || mentionListMatch || rawBotMentionMatch || patternMatch || nameMatch;
-  const derivedMention = explicitMention === true || matched
-    ? true
-    : explicitMention === false
-      ? false
-      : null;
+  const recalledMentionMatch = options.recalledMention === true;
+  const policy = options.policy && typeof options.policy === "object" ? options.policy : {};
+  const policyRegexMatch = Boolean(policy.mentionTextRegex)
+    && explicitMention !== true
+    && wasMentioned(event, ctx, policy) === true;
+  const effectiveEvent = options.effectiveEvent && typeof options.effectiveEvent === "object"
+    ? options.effectiveEvent
+    : event;
+  const effectiveCtx = options.effectiveCtx && typeof options.effectiveCtx === "object"
+    ? options.effectiveCtx
+    : ctx;
+  const effectiveFact = typeof policy.mentionSatisfied === "boolean"
+    ? policy.mentionSatisfied
+    : wasMentioned(effectiveEvent, effectiveCtx, policy);
+  const effectiveMention = typeof effectiveFact === "boolean" ? effectiveFact : null;
+  const matchedBy = [];
+  if (explicitMention === true) matchedBy.push("explicit");
+  if (recalledMentionMatch) matchedBy.push("recalled");
+  if (replyTargetMatch) matchedBy.push("reply_target");
+  if (mentionListMatch) matchedBy.push("mention_list");
+  if (rawBotMentionMatch) matchedBy.push("raw_bot_id");
+  if (patternMatch) matchedBy.push("configured_pattern");
+  if (nameMatch) matchedBy.push("configured_name");
+  if (policyRegexMatch) matchedBy.push("policy_regex");
 
   return {
     explicitMention: typeof explicitMention === "boolean" ? explicitMention : null,
@@ -435,7 +431,12 @@ export function describeMentionEvidence(event = {}, ctx = {}, cfg = {}, pluginCo
     rawBotMentionMatch,
     patternMatch,
     nameMatch,
-    derivedMention
+    recalledMentionMatch,
+    policyRegexMatch,
+    matchedBy,
+    effectiveMention,
+    // Backward-compatible alias retained for existing trace consumers.
+    derivedMention: effectiveMention
   };
 }
 

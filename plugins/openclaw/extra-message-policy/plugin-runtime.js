@@ -32,6 +32,7 @@ import { createPolicyAuditTool } from "./policy-audit.js";
 import {
   describeMentionEvidence,
   forceMentionedDispatchContext,
+  recalledMentionFact,
   rememberMentionFact,
   withDerivedMentionFact
 } from "./runtime-context.js";
@@ -826,6 +827,7 @@ function decisionTrace(state, cfg, hook, event = {}, ctx = {}, policy = {}, pare
   return {
     observedAt: new Date().toISOString(),
     diagnosticSequence: state.diagnosticSequence += 1,
+    diagnosticElapsedMs: Number(process.hrtime.bigint() - state.diagnosticStartedAt) / 1e6,
     traceId,
     messageId: messageId || null,
     accountId: routeAccountId(event, ctx) || null,
@@ -891,7 +893,8 @@ export function registerExtraMessagePolicy(api, options = {}) {
     discordRoutes: new Map(),
     discordChannelParents: new Map(),
     traceCounter: 0,
-    diagnosticSequence: 0
+    diagnosticSequence: 0,
+    diagnosticStartedAt: process.hrtime.bigint()
   };
 
   const resolveEffectiveDecision = async (event = {}, ctx = {}, hook = "unknown") => {
@@ -900,12 +903,7 @@ export function registerExtraMessagePolicy(api, options = {}) {
     const currentPluginConfig = resolveCurrentPluginConfig(currentConfig, api.pluginConfig || {});
     const hydrated = await withHydratedDiscordParent(state, routed.event, routed.ctx, currentConfig, api.logger);
     if (hydrated !== routed) rememberDiscordRoute(state, hydrated.event, hydrated.ctx);
-    const mentionEvidence = describeMentionEvidence(
-      hydrated.event,
-      hydrated.ctx,
-      currentConfig,
-      currentPluginConfig
-    );
+    const recalledMention = recalledMentionFact(state, hydrated.event, hydrated.ctx);
     const enriched = withDerivedMentionFact(
       state,
       hydrated.event,
@@ -945,6 +943,18 @@ export function registerExtraMessagePolicy(api, options = {}) {
       nativeStatus = null;
     }
     const policy = applyNativeMentionGatePolicy(effectivePolicy, nativeStatus, enriched.event, enriched.ctx);
+    const mentionEvidence = describeMentionEvidence(
+      hydrated.event,
+      hydrated.ctx,
+      currentConfig,
+      currentPluginConfig,
+      {
+        recalledMention,
+        effectiveEvent: enriched.event,
+        effectiveCtx: enriched.ctx,
+        policy
+      }
+    );
     return {
       hook,
       event: enriched.event,

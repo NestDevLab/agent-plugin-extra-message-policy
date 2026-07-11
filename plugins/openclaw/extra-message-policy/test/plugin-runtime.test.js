@@ -205,6 +205,100 @@ test("recalled true mention overrides reduced dispatch false", async () => {
   }, { ...ctx, messageId: "msg-recalled-dispatch" });
 
   assert.equal(dispatch, undefined);
+  const dispatchTrace = harness.logs
+    .filter((entry) => entry.message.includes("decision_trace"))
+    .map((entry) => JSON.parse(entry.message.slice(entry.message.indexOf("{"))))
+    .findLast((trace) => trace.hook === "before_dispatch");
+  assert.equal(dispatchTrace.mentionSatisfied, true);
+  assert.equal(dispatchTrace.mentionEvidence.recalledMentionMatch, true);
+  assert.equal(dispatchTrace.mentionEvidence.effectiveMention, true);
+  assert.equal(dispatchTrace.mentionEvidence.derivedMention, true);
+});
+
+test("decision trace mention evidence follows nested provider mention metadata", async () => {
+  const harness = await createHarness({
+    defaultPolicy: { respond: true, ingestMode: "none", requireMention: true }
+  });
+  const ctx = {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "thread-1",
+    conversationId: "channel:thread-1",
+    sessionKey: "agent:main:discord:channel:thread-1",
+    senderId: "user-1",
+    messageId: "msg-nested-provider"
+  };
+  const dispatch = await harness.emit("before_dispatch", {
+    messageId: "msg-nested-provider",
+    metadata: { discord: { wasMentioned: true } }
+  }, ctx);
+
+  assert.equal(dispatch, undefined);
+  const traceLog = harness.logs.find((entry) => entry.message.includes("decision_trace"));
+  const trace = JSON.parse(traceLog.message.slice(traceLog.message.indexOf("{")));
+  assert.equal(trace.mentionSatisfied, true);
+  assert.equal(trace.mentionEvidence.explicitMention, true);
+  assert.equal(trace.mentionEvidence.effectiveMention, true);
+  assert.equal(trace.mentionEvidence.matchedBy.includes("explicit"), true);
+});
+
+test("decision trace ignores noncanonical context metadata mention flags", async () => {
+  const harness = await createHarness({
+    defaultPolicy: { respond: true, ingestMode: "none", requireMention: true }
+  });
+  const dispatch = await harness.emit("before_dispatch", {
+    messageId: "msg-context-metadata"
+  }, {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "thread-1",
+    conversationId: "channel:thread-1",
+    sessionKey: "agent:main:discord:channel:thread-1",
+    senderId: "user-1",
+    messageId: "msg-context-metadata",
+    metadata: { wasMentioned: true }
+  });
+
+  assert.deepEqual(dispatch, { handled: true });
+  const traceLog = harness.logs.find((entry) => entry.message.includes("decision_trace"));
+  const trace = JSON.parse(traceLog.message.slice(traceLog.message.indexOf("{")));
+  assert.equal(trace.mentionSatisfied, false);
+  assert.equal(trace.mentionEvidence.explicitMention, null);
+  assert.equal(trace.mentionEvidence.effectiveMention, false);
+  assert.deepEqual(trace.mentionEvidence.matchedBy, []);
+});
+
+test("decision trace mention evidence follows policy mention text regex", async () => {
+  const harness = await createHarness({
+    defaultPolicy: { respond: false, ingestMode: "none" },
+    policies: [{
+      channelId: "thread-1",
+      respond: true,
+      ingestMode: "none",
+      requireMention: true,
+      mentionTextRegex: "DIAG_TRIGGER"
+    }]
+  });
+  const dispatch = await harness.emit("before_dispatch", {
+    messageId: "msg-policy-regex",
+    content: "DIAG_TRIGGER"
+  }, {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "thread-1",
+    conversationId: "channel:thread-1",
+    sessionKey: "agent:main:discord:channel:thread-1",
+    senderId: "user-1",
+    messageId: "msg-policy-regex"
+  });
+
+  assert.equal(dispatch, undefined);
+  const traceLog = harness.logs.find((entry) => entry.message.includes("decision_trace"));
+  const trace = JSON.parse(traceLog.message.slice(traceLog.message.indexOf("{")));
+  assert.equal(trace.mentionSatisfied, true);
+  assert.equal(trace.mentionEvidence.policyRegexMatch, true);
+  assert.equal(trace.mentionEvidence.effectiveMention, true);
+  assert.equal(trace.mentionEvidence.matchedBy.includes("policy_regex"), true);
 });
 
 test("golden flow: child Discord thread overrides suppressed parent policy", async () => {
@@ -1091,13 +1185,17 @@ test("decision traces expose privacy-safe mention evidence for a raw Discord men
     rawBotMentionMatch: true,
     patternMatch: false,
     nameMatch: false,
+    recalledMentionMatch: false,
+    policyRegexMatch: false,
+    matchedBy: ["raw_bot_id"],
+    effectiveMention: true,
     derivedMention: true
   });
   assert.equal(traceLog.message.includes(privateText), false);
   assert.equal(traceLog.message.includes(botId), false);
 });
 
-test("decision traces include monotonic diagnostic sequence and timestamps across hooks", async () => {
+test("decision traces include monotonic sequence and elapsed time with parseable wall-clock timestamps", async () => {
   const harness = await createHarness({
     defaultPolicy: { respond: true, ingestMode: "none", requireMention: false }
   });
@@ -1119,7 +1217,9 @@ test("decision traces include monotonic diagnostic sequence and timestamps acros
     .filter((entry) => entry.message.includes("decision_trace"))
     .map((entry) => JSON.parse(entry.message.slice(entry.message.indexOf("{"))));
   assert.deepEqual(traces.map((trace) => trace.diagnosticSequence), [1, 2]);
-  assert.equal(traces.every((trace) => /^\d{4}-\d{2}-\d{2}T/.test(trace.observedAt)), true);
+  assert.equal(traces.every((trace) => Number.isFinite(Date.parse(trace.observedAt))), true);
+  assert.equal(traces.every((trace) => Number.isFinite(trace.diagnosticElapsedMs)), true);
+  assert.equal(traces[1].diagnosticElapsedMs >= traces[0].diagnosticElapsedMs, true);
 });
 
 test("policy simulation tool evaluates captured events without sending replies", async () => {
