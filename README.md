@@ -26,3 +26,24 @@ OpenPack runtime selection is declared in `openpack.json` through `runtimes`.
 Defaults are installed as `settings/hermes-extra-message-policy.json` into `.hermes/settings.json` by AgentWheel. The plugin also reads `~/.hermes/settings.json` directly under `extra_message_policy`.
 
 Default policy is conservative: enabled, respond allowed, no passive ingest sink unless configured.
+
+## Companion X/Twitter tools
+
+This package governs chat ingest and chat replies. It does not replace OpenClaw tool allow-lists or review controls for plugins that call outside services.
+
+For example, an OpenClaw workspace can install [TweetClaw](https://github.com/Xquik-dev/tweetclaw) for public X/Twitter automation while this package keeps Discord, Telegram, or other chat channels silent or recall-only:
+
+```sh
+openclaw plugins install @xquik/tweetclaw
+openclaw config set tools.alsoAllow '["explore", "tweetclaw"]'
+```
+
+Keep the responsibilities separate:
+
+- Use Extra Message Policy for channel ingest, raw recall, and reply suppression.
+- Use OpenClaw tool allow-lists and TweetClaw review controls for live `tweetclaw` calls.
+- Store only concise decisions, source URLs, tweet IDs, or follow-up notes in raw recall. Do not write API keys, cookies, raw direct-message bodies, or raw follower exports to JSONL or HTTP sinks.
+
+`explore` lets the agent inspect TweetClaw's endpoint catalog without a live API call. `tweetclaw` performs Xquik-backed actions such as search tweets, search tweet replies, follower export, user lookup, media upload, media download, direct messages, monitor tweets, webhooks, giveaway draws, post tweets, and post tweet replies.
+
+References: [npm package](https://www.npmjs.com/package/@xquik/tweetclaw) and [ClawHub listing](https://clawhub.ai/plugins/@xquik/tweetclaw).
