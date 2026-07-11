@@ -19,7 +19,11 @@ test("schema exposes response and ingest policy", () => {
 });
 
 test("manifest declares registered agent tools", () => {
-  assert.deepEqual(manifest.contracts.tools.sort(), ["list_extra_message_policies", "search_raw_context"]);
+  assert.deepEqual(manifest.contracts.tools.sort(), [
+    "list_extra_message_policies",
+    "search_raw_context",
+    "simulate_extra_message_policy"
+  ]);
 });
 
 test("README documents memory/context/monitoring ingest", () => {

@@ -205,6 +205,19 @@ Example trigger: “Where are we on project X?”
 
 The plugin searches local JSONL shards for relevant terms and injects a short `Relevant passive raw-recall excerpts` block.
 
+## Decision tracing and policy tools
+
+Every policy hook emits a structured `extra-message-policy: decision_trace` log line. The JSON payload is safe for operational debugging and includes the route and policy fields needed to explain the decision:
+
+- `traceId`, `hook`, `messageId`, `accountId`, `guildId`, `channelId`, `threadId`, `parentChannelId`, `sessionKey`
+- `matchedRule`, `candidateRules`, `policySource`, `requireMention`, `mentionSatisfied`, `respond`, `ingestMode`
+- `decision`, `reason`, `handled`, `parentLookupStatus`, and `parentLookup`
+
+The plugin also registers these tools when the OpenClaw runtime exposes `api.registerTool`:
+
+- `list_extra_message_policies` audits effective Discord policy for channels in a guild without returning message content.
+- `simulate_extra_message_policy` evaluates a supplied fake or captured `event`/`ctx` pair and returns the same decision trace shape without sending a reply or mutating Discord.
+
 ## Sinks
 
 ### JSONL sink

@@ -1,6 +1,13 @@
 import { mkdir, appendFile } from "node:fs/promises";
 import path from "node:path";
-import { normalizeConfig, resolvePolicy, shouldIngest, shouldSuppressResponse } from "./policy.js";
+import {
+  describeRule,
+  normalizeConfig,
+  resolvePolicy,
+  ruleMatches,
+  shouldIngest,
+  shouldSuppressResponse
+} from "./policy.js";
 import {
   applyNativeRequireMentionCommand,
   applyNativeMentionGatePolicy,
@@ -257,19 +264,31 @@ async function fetchDiscordChannelParent(channelId, token) {
 async function withHydratedDiscordParent(state, event = {}, ctx = {}, currentConfig = {}, logger = null) {
   const channelId = routeChannelId(event, ctx);
   if (!isDiscordRoute(event, ctx) || !looksLikeDiscordSnowflake(channelId) || routeParentChannelId(event, ctx)) {
-    return { event, ctx };
+    return {
+      event,
+      ctx,
+      parentLookup: {
+        status: routeParentChannelId(event, ctx) ? "not_needed" : "skipped",
+        channelId,
+        parentChannelId: routeParentChannelId(event, ctx)
+      }
+    };
   }
 
   const cached = state.discordChannelParents.get(channelId);
+  const hadCache = state.discordChannelParents.has(channelId);
   let hydrated = cached || null;
+  let lookupStatus = hadCache ? "cache_hit" : "not_found";
   if (!hydrated) {
     const accountId = routeAccountId(event, ctx) || "default";
     const token = discordTokenForAccount(currentConfig, accountId);
     try {
       hydrated = await fetchDiscordChannelParent(channelId, token);
+      lookupStatus = hydrated?.parentChannelId ? "fetched" : "not_found";
     } catch (err) {
       logger?.warn?.(`extra-message-policy: Discord parent lookup failed for ${channelId}: ${String(err)}`);
       hydrated = null;
+      lookupStatus = "failed";
     }
     state.discordChannelParents.set(channelId, hydrated || { channelId, parentChannelId: "", guildId: "" });
     while (state.discordChannelParents.size > 5000) {
@@ -278,7 +297,17 @@ async function withHydratedDiscordParent(state, event = {}, ctx = {}, currentCon
     }
   }
 
-  if (!hydrated?.parentChannelId) return { event, ctx };
+  if (!hydrated?.parentChannelId) {
+    return {
+      event,
+      ctx,
+      parentLookup: {
+        status: lookupStatus,
+        channelId,
+        parentChannelId: ""
+      }
+    };
+  }
 
   const guildId = routeGuildId(event, ctx) || hydrated.guildId;
   const metadata = {
@@ -315,6 +344,11 @@ async function withHydratedDiscordParent(state, event = {}, ctx = {}, currentCon
       parentChannelId: ctx.parentChannelId || hydrated.parentChannelId,
       threadParentId: ctx.threadParentId || hydrated.parentChannelId,
       metadata
+    },
+    parentLookup: {
+      status: lookupStatus,
+      channelId,
+      parentChannelId: hydrated.parentChannelId
     }
   };
 }
@@ -748,6 +782,92 @@ function policyActor(event = {}, ctx = {}) {
   return ctx.senderId || ctx.SenderId || event.senderId || event.SenderId || "";
 }
 
+function matchedChannelId(policy = {}) {
+  const match = String(policy.matched || "").match(/(?:^|\+)channelId:([^,+]+)/);
+  return match?.[1] || "";
+}
+
+function policySource(policy = {}, event = {}, ctx = {}) {
+  if (!policy?.matched || policy.matched === "default") return "default";
+  const matchedChannel = stripConversationPrefix(matchedChannelId(policy));
+  if (!matchedChannel) return policy.matched.includes("runtime") ? "thread" : "default";
+  const channelId = routeChannelId(event, ctx);
+  const parentChannelId = routeParentChannelId(event, ctx);
+  if (matchedChannel && parentChannelId && matchedChannel === parentChannelId) return "parent";
+  if (matchedChannel && channelId && matchedChannel === channelId) return "thread";
+  return "thread";
+}
+
+function traceReason(policy = {}) {
+  if (policy.nativeEnabledGate === true) return "native_disabled";
+  if (policy.respond === false && policy.requireMention === true && policy.mentionSatisfied === false) return "mention_required";
+  if (policy.respond === false) return "respond_false";
+  return "allowed";
+}
+
+function candidateRules(cfg = {}, event = {}, ctx = {}) {
+  return (cfg.policies || [])
+    .filter((rule) => ruleMatches(rule, event, ctx))
+    .map((rule) => describeRule(rule));
+}
+
+function decisionTrace(state, cfg, hook, event = {}, ctx = {}, policy = {}, parentLookup = {}, handled = false) {
+  const messageId = eventMessageId(event, ctx);
+  const channelId = routeChannelId(event, ctx);
+  const parentChannelId = routeParentChannelId(event, ctx);
+  const source = policySource(policy, event, ctx);
+  const decision = handled || shouldSuppressResponse(policy) ? "suppress" : "allow";
+  const traceId = [
+    hook,
+    messageId || ctx.runId || ctx.RunId || event.runId || event.RunId || `trace-${state.traceCounter += 1}`,
+    channelId || "unknown"
+  ].join(":");
+  return {
+    traceId,
+    messageId: messageId || null,
+    accountId: routeAccountId(event, ctx) || null,
+    guildId: routeGuildId(event, ctx) || null,
+    channelId: channelId || null,
+    threadId: textValue(event.threadId, event.ThreadId, ctx.threadId, ctx.ThreadId, channelId) || null,
+    parentChannelId: parentChannelId || null,
+    sessionKey: routeSessionKey(event, ctx) || null,
+    matchedRule: policy.matched || "default",
+    candidateRules: candidateRules(cfg, event, ctx),
+    policySource: source,
+    requireMention: policy.requireMention === true,
+    mentionSatisfied: typeof policy.mentionSatisfied === "boolean" ? policy.mentionSatisfied : null,
+    respond: policy.respond === true,
+    ingestMode: policy.ingestMode || null,
+    decision,
+    reason: traceReason(policy),
+    hook,
+    handled: handled || shouldSuppressResponse(policy),
+    parentLookupStatus: parentLookup?.status || "unknown",
+    parentLookup: {
+      status: parentLookup?.status || "unknown",
+      channelId: parentLookup?.channelId || channelId || null,
+      parentChannelId: parentLookup?.parentChannelId || parentChannelId || null
+    }
+  };
+}
+
+function logDecisionTrace(api, trace) {
+  api.logger.info(`extra-message-policy: decision_trace ${JSON.stringify(trace)}`);
+}
+
+function formatSimulationText(trace) {
+  return [
+    "extra-message-policy simulation",
+    `decision=${trace.decision}`,
+    `reason=${trace.reason}`,
+    `matched=${trace.matchedRule}`,
+    `source=${trace.policySource}`,
+    `respond=${trace.respond}`,
+    `requireMention=${trace.requireMention}`,
+    `mentionSatisfied=${trace.mentionSatisfied}`
+  ].join("\n");
+}
+
 export function registerExtraMessagePolicy(api, options = {}) {
   const cfg = normalizeConfig(api.pluginConfig || {});
   const commandConfig = normalizePolicyCommandConfig(api.pluginConfig || {});
@@ -765,10 +885,11 @@ export function registerExtraMessagePolicy(api, options = {}) {
     responsePolicy: new Map(),
     mentionFacts: new Map(),
     discordRoutes: new Map(),
-    discordChannelParents: new Map()
+    discordChannelParents: new Map(),
+    traceCounter: 0
   };
 
-  const resolveEffectivePolicy = async (event = {}, ctx = {}) => {
+  const resolveEffectiveDecision = async (event = {}, ctx = {}, hook = "unknown") => {
     const routed = withRememberedDiscordRoute(state, event, ctx);
     const currentConfig = api.runtime?.config?.current?.() || api.config || {};
     const currentPluginConfig = resolveCurrentPluginConfig(currentConfig, api.pluginConfig || {});
@@ -812,7 +933,18 @@ export function registerExtraMessagePolicy(api, options = {}) {
     } catch {
       nativeStatus = null;
     }
-    return applyNativeMentionGatePolicy(effectivePolicy, nativeStatus, enriched.event, enriched.ctx);
+    const policy = applyNativeMentionGatePolicy(effectivePolicy, nativeStatus, enriched.event, enriched.ctx);
+    return {
+      hook,
+      event: enriched.event,
+      ctx: enriched.ctx,
+      policy,
+      parentLookup: hydrated.parentLookup || {}
+    };
+  };
+
+  const resolveEffectivePolicy = async (event = {}, ctx = {}) => {
+    return (await resolveEffectiveDecision(event, ctx)).policy;
   };
 
   if (commandConfig.enabled) {
@@ -935,6 +1067,40 @@ export function registerExtraMessagePolicy(api, options = {}) {
 
   api.registerTool?.((toolCtx) => createRawContextSearchTool(cfg.rawRecall, toolCtx), { name: "search_raw_context", optional: true });
   api.registerTool?.((toolCtx) => createPolicyAuditTool(api, cfg, toolCtx), { name: "list_extra_message_policies", optional: true });
+  api.registerTool?.(() => ({
+    name: "simulate_extra_message_policy",
+    label: "Simulate Extra Message Policy",
+    description: "Evaluate extra-message-policy for a supplied event/context without sending a reply or mutating Discord.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        hook: {
+          type: "string",
+          description: "Hook name to simulate: message_received, inbound_claim, before_dispatch, typing_start, dispatch_allow, dispatch_suppress, or message_sending."
+        },
+        event: {
+          type: "object",
+          description: "Captured or fake event object. Use fake ids for dry-run tests."
+        },
+        ctx: {
+          type: "object",
+          description: "Captured or fake runtime context object. Use fake ids for dry-run tests."
+        }
+      }
+    },
+    async execute(_toolCallId, params = {}) {
+      const hook = String(params.hook || "before_dispatch");
+      const decision = await resolveEffectiveDecision(params.event || {}, params.ctx || {}, hook);
+      const handled = ["inbound_claim", "before_dispatch", "dispatch_suppress"].includes(hook)
+        && shouldSuppressResponse(decision.policy);
+      const trace = decisionTrace(state, cfg, hook, decision.event, decision.ctx, decision.policy, decision.parentLookup, handled);
+      return {
+        content: [{ type: "text", text: formatSimulationText(trace) }],
+        details: trace
+      };
+    }
+  }), { name: "simulate_extra_message_policy", optional: true });
 
   api.on("before_agent_start", async (event, ctx) => {
     const appendSystemContext = buildRawRecallGuidance(cfg.rawRecall);
@@ -951,41 +1117,50 @@ export function registerExtraMessagePolicy(api, options = {}) {
     rememberDiscordRoute(state, event, ctx);
     rememberMentionFact(state, event, ctx);
     if (isLikelyTextCommand(event, ctx)) return;
-    const policy = await resolveEffectivePolicy(event, ctx);
-    if (shouldSuppressResponse(policy)) {
-      rememberResponsePolicy(state, event, ctx, policy);
-      await ingest(api, cfg, state, "before_dispatch", event, ctx, policy);
-      api.logger.info(`extra-message-policy: suppressed inbound claim for ${ctx.sessionKey || ctx.conversationId || ctx.channelId || "unknown"}`);
+    const decision = await resolveEffectiveDecision(event, ctx, "inbound_claim");
+    if (shouldSuppressResponse(decision.policy)) {
+      rememberResponsePolicy(state, decision.event, decision.ctx, decision.policy);
+      await ingest(api, cfg, state, "before_dispatch", decision.event, decision.ctx, decision.policy);
+      logDecisionTrace(api, decisionTrace(state, cfg, "inbound_claim", decision.event, decision.ctx, decision.policy, decision.parentLookup, true));
+      api.logger.info(`extra-message-policy: suppressed inbound claim for ${decision.ctx.sessionKey || decision.ctx.conversationId || decision.ctx.channelId || "unknown"}`);
       return { handled: true };
     }
+    logDecisionTrace(api, decisionTrace(state, cfg, "inbound_claim", decision.event, decision.ctx, decision.policy, decision.parentLookup, false));
   }, { priority: 1000 });
 
   api.on("message_received", async (event, ctx) => {
     if (isPolicyCommand(commandConfig, event, ctx)) return;
     rememberDiscordRoute(state, event, ctx);
-    const policy = await resolveEffectivePolicy(event, ctx);
-    await ingest(api, cfg, state, "message_received", event, ctx, policy);
+    const decision = await resolveEffectiveDecision(event, ctx, "message_received");
+    await ingest(api, cfg, state, "message_received", decision.event, decision.ctx, decision.policy);
+    logDecisionTrace(api, decisionTrace(state, cfg, "message_received", decision.event, decision.ctx, decision.policy, decision.parentLookup, false));
   });
 
   api.on("before_dispatch", async (event, ctx) => {
     if (isPolicyCommand(commandConfig, event, ctx)) return;
     rememberDiscordRoute(state, event, ctx);
-    const policy = await resolveEffectivePolicy(event, ctx);
-    rememberResponsePolicy(state, event, ctx, policy);
-    await ingest(api, cfg, state, "before_dispatch", event, ctx, policy);
+    const decision = await resolveEffectiveDecision(event, ctx, "before_dispatch");
+    rememberResponsePolicy(state, decision.event, decision.ctx, decision.policy);
+    await ingest(api, cfg, state, "before_dispatch", decision.event, decision.ctx, decision.policy);
 
-    if (shouldSuppressResponse(policy)) {
-      api.logger.info(`extra-message-policy: suppressed response for ${ctx.sessionKey || ctx.conversationId || ctx.channelId || "unknown"}`);
+    if (shouldSuppressResponse(decision.policy)) {
+      logDecisionTrace(api, decisionTrace(state, cfg, "before_dispatch", decision.event, decision.ctx, decision.policy, decision.parentLookup, true));
+      api.logger.info(`extra-message-policy: suppressed response for ${decision.ctx.sessionKey || decision.ctx.conversationId || decision.ctx.channelId || "unknown"}`);
       return { handled: true };
     }
+    logDecisionTrace(api, decisionTrace(state, cfg, "before_dispatch", decision.event, decision.ctx, decision.policy, decision.parentLookup, false));
   });
 
   api.on("reply_dispatch", async (event) => {
     const dispatchCtx = event?.ctx || {};
     if (isPolicyCommand(commandConfig, dispatchPolicyEvent(dispatchCtx), dispatchPolicyContext(dispatchCtx))) return;
-    const policy = await resolveEffectivePolicy(dispatchPolicyEvent(dispatchCtx), dispatchPolicyContext(dispatchCtx));
-    if (!shouldForceReplyContext(policy)) return;
+    const decision = await resolveEffectiveDecision(dispatchPolicyEvent(dispatchCtx), dispatchPolicyContext(dispatchCtx), "reply_dispatch");
+    if (!shouldForceReplyContext(decision.policy)) {
+      logDecisionTrace(api, decisionTrace(state, cfg, "reply_dispatch", decision.event, decision.ctx, decision.policy, decision.parentLookup, false));
+      return;
+    }
     forceMentionedDispatchContext(dispatchCtx);
+    logDecisionTrace(api, decisionTrace(state, cfg, "reply_dispatch", decision.event, decision.ctx, decision.policy, decision.parentLookup, false));
     api.logger.info(`extra-message-policy: forced reply context for ${dispatchCtx.SessionKey || dispatchCtx.OriginatingTo || dispatchCtx.To || "unknown"}`);
   });
 

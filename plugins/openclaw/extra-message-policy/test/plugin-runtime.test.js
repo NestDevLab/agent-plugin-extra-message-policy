@@ -965,6 +965,130 @@ test("golden flow: inbound_claim suppresses unmentioned Discord before Codex can
   assert.equal(rows[0].policy.matched, "channelId:claim-channel");
 });
 
+test("golden flow: decision traces include route, policy, and parent lookup details", async () => {
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    assert.equal(String(url), "https://discord.com/api/v10/channels/333333333333333333");
+    return {
+      ok: true,
+      async json() {
+        return {
+          id: "333333333333333333",
+          type: 11,
+          guild_id: "222222222222222222",
+          parent_id: "111111111111111111"
+        };
+      }
+    };
+  };
+
+  try {
+    const harness = await createHarness({
+      defaultPolicy: { respond: true, ingestMode: "none" },
+      policies: [
+        {
+          channelId: "111111111111111111",
+          guildId: "222222222222222222",
+          accountId: "default",
+          respond: true,
+          ingestMode: "all",
+          requireMention: true
+        }
+      ]
+    }, {
+      channels: {
+        discord: {
+          accounts: {
+            default: { token: "fake-token" }
+          }
+        }
+      }
+    });
+
+    const event = {
+      messageId: "444444444444444444",
+      content: "unmentioned thread message",
+      wasMentioned: false,
+      threadId: "333333333333333333",
+      metadata: {
+        provider: "discord",
+        guildId: "222222222222222222"
+      }
+    };
+    const ctx = {
+      accountId: "default",
+      guildId: "222222222222222222",
+      channelId: "discord",
+      conversationId: "channel:333333333333333333",
+      sessionKey: "agent:example-staff:discord:channel:333333333333333333",
+      senderId: "user-1",
+      messageId: "444444444444444444",
+      wasMentioned: false
+    };
+
+    const dispatch = await harness.emit("before_dispatch", event, ctx);
+
+    assert.deepEqual(dispatch, { handled: true });
+    const traceLog = harness.logs.find((entry) => entry.message.includes("decision_trace"));
+    assert.ok(traceLog, "decision trace log should be emitted");
+    const trace = JSON.parse(traceLog.message.slice(traceLog.message.indexOf("{")));
+    assert.equal(trace.hook, "before_dispatch");
+    assert.equal(trace.messageId, "444444444444444444");
+    assert.equal(trace.channelId, "333333333333333333");
+    assert.equal(trace.threadId, "333333333333333333");
+    assert.equal(trace.parentChannelId, "111111111111111111");
+    assert.equal(trace.policySource, "parent");
+    assert.equal(trace.matchedRule, "channelId:111111111111111111,guildId:222222222222222222,accountId:default");
+    assert.equal(trace.requireMention, true);
+    assert.equal(trace.mentionSatisfied, false);
+    assert.equal(trace.respond, false);
+    assert.equal(trace.decision, "suppress");
+    assert.equal(trace.reason, "mention_required");
+    assert.equal(trace.handled, true);
+    assert.equal(trace.parentLookupStatus, "fetched");
+    assert.ok(trace.candidateRules.includes("channelId:111111111111111111,guildId:222222222222222222,accountId:default"));
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("policy simulation tool evaluates captured events without sending replies", async () => {
+  const harness = await createHarness({
+    defaultPolicy: { respond: true, ingestMode: "all" },
+    policies: [
+      { channelId: "parent-1", respond: true, ingestMode: "all", requireMention: true }
+    ]
+  });
+
+  const toolEntry = harness.tools.find((entry) => entry.options?.name === "simulate_extra_message_policy");
+  assert.ok(toolEntry, "simulate tool should be registered");
+  const tool = toolEntry.factory({});
+  const result = await tool.execute("tool-call", {
+    hook: "before_dispatch",
+    event: {
+      messageId: "msg-sim",
+      content: "plain captured message",
+      wasMentioned: false,
+      threadId: "thread-1"
+    },
+    ctx: {
+      accountId: "default",
+      guildId: "guild-1",
+      channelId: "thread-1",
+      parentChannelId: "parent-1",
+      conversationId: "channel:thread-1",
+      sessionKey: "agent:main:discord:channel:thread-1",
+      messageId: "msg-sim",
+      wasMentioned: false
+    }
+  });
+
+  assert.match(result.content[0].text, /decision=suppress/);
+  assert.equal(result.details.respond, false);
+  assert.equal(result.details.policySource, "parent");
+  assert.equal(result.details.handled, true);
+});
+
 test("golden flow: inbound_claim leaves slash commands available in mention-only channels", async () => {
   const harness = await createHarness({
     defaultPolicy: { respond: true, ingestMode: "all" },
