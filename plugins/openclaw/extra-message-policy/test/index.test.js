@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, utimes, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { createDiscordSdkCompat } from "../discord-sdk-compat.js";
 import { applyNativeReplyHandling, normalizeNativeReplyHandling } from "../native-reply.js";
@@ -55,6 +58,111 @@ test("Discord SDK compat falls back to external plugin public surfaces", () => {
     ["register", { buildResult: payload }]
   ]);
 });
+
+test("Discord SDK compat resolves isolated OpenClaw npm project surfaces", async () => {
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "extra-policy-discord-sdk-"));
+  const packageRoot = path.join(
+    stateDir,
+    "npm",
+    "projects",
+    "openclaw-discord-test",
+    "node_modules",
+    "@openclaw",
+    "discord"
+  );
+  await mkdir(path.join(packageRoot, "dist"), { recursive: true });
+  await writeFile(path.join(packageRoot, "package.json"), JSON.stringify({
+    name: "@openclaw/discord",
+    version: "2026.6.11",
+    type: "commonjs"
+  }));
+  await writeFile(path.join(packageRoot, "dist", "api.js"), [
+    "module.exports = {",
+    "  buildDiscordComponentMessage(payload) {",
+    "    return { components: [{ type: 1, payload }] };",
+    "  }",
+    "};"
+  ].join("\n"));
+  await writeFile(path.join(packageRoot, "dist", "runtime-api.js"), [
+    "module.exports = {",
+    "  registerBuiltDiscordComponentMessage() { return 'isolated-registered'; }",
+    "};"
+  ].join("\n"));
+
+  const compat = createDiscordSdkCompat({
+    buildDiscordComponentMessage() {
+      throw new Error("Unable to resolve bundled plugin public surface discord/api.js");
+    },
+    registerBuiltDiscordComponentMessage() {
+      throw new Error("Unable to resolve bundled plugin public surface discord/runtime-api.js");
+    }
+  }, { stateDir });
+
+  const payload = { spec: { blocks: [] } };
+  assert.deepEqual(compat.buildDiscordComponentMessage(payload), {
+    components: [{ type: 1, payload }]
+  });
+  assert.equal(
+    compat.registerBuiltDiscordComponentMessage({ buildResult: payload }),
+    "isolated-registered"
+  );
+});
+
+
+test("Discord SDK compat ignores isolated projects from a different OpenClaw version", async () => {
+  const stateDir = await mkdtemp(path.join(os.tmpdir(), "extra-policy-discord-version-"));
+  const hostRoot = path.join(stateDir, "host-openclaw");
+  await mkdir(path.join(hostRoot, "dist"), { recursive: true });
+  await writeFile(path.join(hostRoot, "package.json"), JSON.stringify({
+    name: "openclaw",
+    version: "2026.6.11",
+    type: "module"
+  }));
+  const writeProject = async (name, version, marker, mtime) => {
+    const packageRoot = path.join(
+      stateDir,
+      "npm",
+      "projects",
+      name,
+      "node_modules",
+      "@openclaw",
+      "discord"
+    );
+    await mkdir(path.join(packageRoot, "dist"), { recursive: true });
+    const packagePath = path.join(packageRoot, "package.json");
+    await writeFile(packagePath, JSON.stringify({
+      name: "@openclaw/discord",
+      version,
+      type: "commonjs"
+    }));
+    await writeFile(path.join(packageRoot, "dist", "api.js"), [
+      "module.exports = {",
+      `  buildDiscordComponentMessage() { return { components: ['${marker}'] }; }`,
+      "};"
+    ].join("\n"));
+    await utimes(packagePath, mtime, mtime);
+  };
+  await writeProject("compatible", "2026.6.11", "compatible", new Date(1_000_000_000_000));
+  await writeProject("stale-newer", "2026.7.1", "stale", new Date(2_000_000_000_000));
+  const moduleRequire = () => {
+    throw new Error("external package is not linked below the core package");
+  };
+  moduleRequire.resolve = (specifier) => {
+    if (specifier !== "openclaw") throw new Error(`unexpected resolve: ${specifier}`);
+    return path.join(hostRoot, "dist", "index.js");
+  };
+  const compat = createDiscordSdkCompat({
+    buildDiscordComponentMessage() {
+      throw new Error("Unable to resolve bundled plugin public surface discord/api.js");
+    }
+  }, { stateDir, moduleRequire });
+
+  assert.deepEqual(
+    compat.buildDiscordComponentMessage({ spec: { blocks: [] } }),
+    { components: ["compatible"] }
+  );
+});
+
 
 test("Discord SDK compat preserves non-resolution component errors", () => {
   const compat = createDiscordSdkCompat({

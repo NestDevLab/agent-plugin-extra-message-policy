@@ -682,7 +682,10 @@ function buildDashboardComponents(view, ctx = {}, discordSdk = {}) {
       discordSdk.registerBuiltDiscordComponentMessage({ buildResult });
     }
     return flattenClassicActionRows(buildResult.components);
-  } catch {
+  } catch (err) {
+    const rawType = err instanceof Error ? (err.name || "Error") : "NonError";
+    const errorType = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(rawType) ? rawType : "Error";
+    discordSdk.logger?.warn?.(`extra-message-policy: Discord component build failed (${errorType})`);
     return [];
   }
 }
@@ -719,26 +722,64 @@ function dispatchParentChannelId(ctx = {}) {
 }
 
 function dispatchPolicyContext(ctx = {}) {
+  const metadata = ctx.metadata && typeof ctx.metadata === "object" ? ctx.metadata : {};
   const parentChannelId = dispatchParentChannelId(ctx);
+  const accountId = ctx.AccountId || ctx.accountId || metadata.accountId || metadata.account_id;
+  const guildId = ctx.GroupSpace || ctx.guildId || metadata.guildId || metadata.guild_id || ctx.rawGuildId || metadata.rawGuildId || metadata.raw_guild_id;
+  const rawGuildId = ctx.rawGuildId || metadata.rawGuildId || metadata.raw_guild_id || ctx.GroupSpace || guildId;
+  const channelId = ctx.NativeChannelId || ctx.ChannelId || ctx.channelId || metadata.channelId || metadata.channel_id;
+  const conversationId = ctx.OriginatingTo || ctx.To || ctx.conversationId || metadata.to || metadata.conversationId;
+  const sessionKey = ctx.SessionKey || ctx.sessionKey || metadata.sessionKey;
+  const senderId = ctx.SenderId || ctx.senderId || metadata.senderId;
+  const wasMentioned = ctx.WasMentioned ?? ctx.wasMentioned ?? metadata.wasMentioned;
   return {
-    accountId: ctx.AccountId || ctx.accountId,
-    guildId: ctx.GroupSpace || ctx.guildId || ctx.rawGuildId,
-    rawGuildId: ctx.GroupSpace || ctx.rawGuildId || ctx.guildId,
-    channelId: ctx.NativeChannelId || ctx.ChannelId || ctx.channelId,
+    accountId,
+    guildId,
+    rawGuildId,
+    channelId,
     parentChannelId,
     threadParentId: parentChannelId,
-    conversationId: ctx.OriginatingTo || ctx.To || ctx.conversationId,
-    sessionKey: ctx.SessionKey || ctx.sessionKey,
-    senderId: ctx.SenderId || ctx.senderId,
-    wasMentioned: ctx.WasMentioned,
+    conversationId,
+    sessionKey,
+    senderId,
+    wasMentioned,
     metadata: {
-      accountId: ctx.AccountId || ctx.accountId,
-      guildId: ctx.GroupSpace || ctx.guildId,
-      channelId: ctx.NativeChannelId || ctx.ChannelId || ctx.channelId,
+      ...metadata,
+      accountId,
+      guildId,
+      rawGuildId,
+      raw_guild_id: rawGuildId,
+      channelId,
       parentChannelId,
       threadParentId: parentChannelId,
       thread_parent_id: parentChannelId,
-      to: ctx.OriginatingTo || ctx.To
+      to: conversationId
+    }
+  };
+}
+
+function normalizePolicyCommandContext(ctx = {}) {
+  const normalized = dispatchPolicyContext(ctx);
+  const canonicalGuildId = normalized.rawGuildId || normalized.guildId;
+  const sourceInteraction = ctx.interaction ?? ctx.Interaction;
+  const interaction = sourceInteraction && typeof sourceInteraction === "object"
+    ? { ...sourceInteraction, payload: sourceInteraction.payload ?? sourceInteraction.Payload }
+    : sourceInteraction;
+  return {
+    ...ctx,
+    ...normalized,
+    guildId: canonicalGuildId,
+    displayGuildId: normalized.guildId,
+    args: ctx.args ?? ctx.Args ?? "",
+    agentId: ctx.agentId ?? ctx.AgentId,
+    commandName: ctx.commandName ?? ctx.CommandName,
+    interaction,
+    respond: ctx.respond ?? ctx.Respond,
+    metadata: {
+      ...(ctx.metadata || {}),
+      ...(normalized.metadata || {}),
+      guildId: canonicalGuildId,
+      displayGuildId: normalized.guildId
     }
   };
 }
@@ -880,7 +921,10 @@ export function registerExtraMessagePolicy(api, options = {}) {
   const policyStatePath = defaultPolicyStatePath(api, commandConfig);
   const approvalPromptHandling = normalizeApprovalPromptHandling(api.pluginConfig?.approvalPromptHandling || {});
   const nativeReplyHandling = normalizeNativeReplyHandling(api.pluginConfig?.nativeReplyHandling || {});
-  const discordSdk = options.discordSdk || {};
+  const discordSdk = {
+    ...(options.discordSdk || {}),
+    logger: api.logger
+  };
   if (!cfg.enabled) {
     api.logger.info("extra-message-policy: disabled");
     return;
@@ -1053,9 +1097,10 @@ export function registerExtraMessagePolicy(api, options = {}) {
       acceptsArgs: true,
       requireAuth: true,
       handler: async (ctx) => {
-        const command = parsePolicyCommand(ctx?.args || "");
+        const effectiveCtx = normalizePolicyCommandContext(ctx || {});
+        const command = parsePolicyCommand(effectiveCtx.args || "");
         if (command.action === "help") return { text: renderPolicyHelp(commandConfig.commandName) };
-        return await runPolicyAction(ctx || {}, command, { allowHelp: true });
+        return await runPolicyAction(effectiveCtx, command, { allowHelp: true });
       }
     });
 
@@ -1063,14 +1108,15 @@ export function registerExtraMessagePolicy(api, options = {}) {
       channel: "discord",
       namespace: "policy",
       handler: async (ctx) => {
-        const command = parsePolicyDashboardAction(ctx?.interaction?.payload || "status");
-        const effectiveCtx = command.scope ? contextFromPolicyScope(command.scope, ctx || {}) : (ctx || {});
+        const normalizedCtx = normalizePolicyCommandContext(ctx || {});
+        const command = parsePolicyDashboardAction(normalizedCtx?.interaction?.payload || "status");
+        const effectiveCtx = command.scope ? contextFromPolicyScope(command.scope, normalizedCtx) : normalizedCtx;
         if (command.action === "dismiss") {
-          await ctx.respond?.clearComponents?.({ text: "Policy panel dismissed." });
+          await normalizedCtx.respond?.clearComponents?.({ text: "Policy panel dismissed." });
           return { handled: true };
         }
         const result = await runPolicyAction(effectiveCtx, command);
-        await ctx.respond?.editMessage?.({
+        await normalizedCtx.respond?.editMessage?.({
           text: result.text,
           components: result.channelData?.discord?.components || []
         });

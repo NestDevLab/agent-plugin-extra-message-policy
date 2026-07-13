@@ -1940,6 +1940,191 @@ test("golden flow: command and interactive handlers cover dashboard actions", as
 });
 
 
+test("policy command normalizes Discord 6.11 command context", async () => {
+  const expectedSessionKey = "agent:main:discord:channel:channel-1";
+  const harness = await createHarness({
+    defaultPolicy: { respond: false, ingestMode: "none" },
+    policies: [{
+      channel: "discord",
+      accountId: "default",
+      guildId: "guild-1",
+      channelId: "channel-1",
+      respond: true,
+      ingestMode: "all"
+    }]
+  }, {
+    channels: {
+      discord: {
+        accounts: {
+          default: {
+            guilds: {
+              "guild-1": {
+                channels: {
+                  "channel-1": { requireMention: false }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }, {
+    discordSdk: {
+      buildDiscordComponentMessage(payload) {
+        assert.equal(payload.sessionKey, expectedSessionKey);
+        assert.equal(payload.accountId, "default");
+        return {
+          components: [{
+            type: 17,
+            isV2: true,
+            components: [{ type: 1, payload }]
+          }]
+        };
+      },
+      registerBuiltDiscordComponentMessage() {}
+    }
+  });
+
+  const result = await harness.commands[0].handler({
+    args: "status",
+    AccountId: "default",
+    GroupSpace: "guild-1",
+    NativeChannelId: "channel-1",
+    OriginatingTo: "channel:channel-1",
+    SenderId: "operator",
+    SessionKey: expectedSessionKey
+  });
+
+  assert.doesNotMatch(result.text, /Bot replies: `Off`/);
+  assert.doesNotMatch(result.text, /Bot reads: `Off`/);
+  assert.doesNotMatch(result.text, /Native mention gate: `Unknown`/);
+  assert.equal(result.channelData.discord.components.length, 1);
+  assert.equal(result.channelData.discord.components[0].type, 1);
+
+  const callback = result.channelData.discord.components[0].payload.spec.blocks
+    .flatMap((block) => block.buttons || [])
+    .find((button) => button.label === "Details").callbackData;
+  const edits = [];
+  const handled = await harness.interactiveHandlers[0].handler({
+    AccountId: "default",
+    GroupSpace: "guild-1",
+    NativeChannelId: "channel-1",
+    OriginatingTo: "channel:channel-1",
+    SenderId: "operator",
+    SessionKey: expectedSessionKey,
+    Interaction: { Payload: callback },
+    Respond: {
+      editMessage(payload) {
+        edits.push(payload);
+      }
+    }
+  });
+  assert.deepEqual(handled, { handled: true });
+  assert.equal(edits.length, 1);
+  assert.match(edits[0].text, /Details/);
+});
+
+
+test("policy command preserves lowercase metadata-only Discord routing", async () => {
+  const harness = await createHarness({
+    defaultPolicy: { respond: false, ingestMode: "none" },
+    policies: [{
+      channel: "discord",
+      accountId: "default",
+      guildId: "guild-1",
+      channelId: "channel-1",
+      respond: true,
+      ingestMode: "all"
+    }]
+  }, {
+    channels: {
+      discord: {
+        accounts: {
+          default: {
+            guilds: {
+              "guild-1": {
+                channels: {
+                  "channel-1": { requireMention: false }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  const result = await harness.commands[0].handler({
+    args: "status",
+    conversationId: "channel:channel-1",
+    sessionKey: "agent:main:discord:channel:channel-1",
+    senderId: "operator",
+    metadata: {
+      accountId: "default",
+      guildId: "guild-1",
+      channelId: "channel-1"
+    }
+  });
+
+  assert.doesNotMatch(result.text, /Bot replies: `Off`/);
+  assert.doesNotMatch(result.text, /Bot reads: `Off`/);
+  assert.doesNotMatch(result.text, /Native mention gate: `Unknown`/);
+  assert.equal(result.channelData.discord.components.length, 1);
+  assert.equal(harness.builtComponentMessages[0].accountId, "default");
+});
+
+
+test("policy command preserves distinct raw Discord guild ids", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "extra-policy-command-raw-guild-"));
+  const statePath = path.join(root, "policy-state.json");
+  const harness = await createHarness({
+    policyCommand: { statePath },
+    defaultPolicy: { respond: false, ingestMode: "none" },
+    policies: [{
+      channel: "discord",
+      accountId: "default",
+      guildId: "raw-guild",
+      channelId: "channel-1",
+      respond: true,
+      ingestMode: "all"
+    }]
+  }, {
+    channels: {
+      discord: {
+        accounts: {
+          default: {
+            guilds: {
+              "raw-guild": {
+                channels: {
+                  "channel-1": { requireMention: false }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  const result = await harness.commands[0].handler({
+    args: "response always",
+    accountId: "default",
+    guildId: "display-guild",
+    rawGuildId: "raw-guild",
+    channelId: "channel-1",
+    conversationId: "channel:channel-1",
+    sessionKey: "agent:main:discord:channel:channel-1",
+    senderId: "operator"
+  });
+
+  assert.doesNotMatch(result.text, /Bot replies: `Off`/);
+  assert.match(result.text, /Native mention gate: `Off`/);
+  const state = JSON.parse(await readFile(statePath, "utf8"));
+  assert.equal(state.scopes["discord:default:raw-guild:channel-1"].policy.responseMode, "always");
+  assert.equal(state.scopes["discord:default:display-guild:channel-1"], undefined);
+});
+
+
 test("policy command falls back to text when Discord components fail", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "extra-policy-command-fallback-"));
   const statePath = path.join(root, "policy-state.json");
@@ -1966,6 +2151,9 @@ test("policy command falls back to text when Discord components fail", async () 
 
   assert.match(result.text, /Message policy/);
   assert.deepEqual(result.channelData.discord.components, []);
+  const warning = harness.logs.at(-1)?.message || "";
+  assert.match(warning, /Discord component build failed \(Error\)/);
+  assert.doesNotMatch(warning, /missing Discord public surface/);
 });
 
 test("golden flow: firstTag promotes exact thread scope to reply always", async () => {

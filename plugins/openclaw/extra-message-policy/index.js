@@ -18,6 +18,8 @@ export default definePluginEntry({
       discordSdk: createDiscordSdkCompat({
         buildDiscordComponentMessage,
         registerBuiltDiscordComponentMessage
+      }, {
+        stateDir: api.runtime?.state?.resolveStateDir?.()
       })
     });
   }
