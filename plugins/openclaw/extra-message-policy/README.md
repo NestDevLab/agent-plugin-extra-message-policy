@@ -52,6 +52,19 @@ Important points:
 
 ## Config model
 
+| Field | Default | Effect |
+| --- | --- | --- |
+| `respond` | `true` | Allows an admitted response candidate to continue. |
+| `ingestMode` | `responseCandidates` | Selects which visible messages are ingested. |
+| `requireMention` | `false` | Requires current mention evidence before responding. |
+| `mentionRecall` | `true` | Lets a mention fact preserved between reduced runtime hooks satisfy `requireMention`. Set `false` to require evidence on the current message. |
+
+`mentionRecall: false` ignores only recalled mention facts. Provider
+`wasMentioned`, native mention arrays, replies to the bot, and configured
+`mentionDetection` names or patterns still satisfy `requireMention`. Message
+ingest is unchanged. The field may be set in `defaultPolicy`, overridden by a
+matching policy rule, or supplied by a configured `runtimePolicy`.
+
 ### `respond`
 
 Boolean. Default: `true`.
@@ -100,6 +113,8 @@ This command shape follows the preferred custom-plugin convention: one top-level
       "enabled": true,
       "defaultPolicy": {
         "respond": true,
+        "requireMention": true,
+        "mentionRecall": false,
         "ingestMode": "responseCandidates"
       },
       "policies": [
@@ -210,7 +225,7 @@ The plugin searches local JSONL shards for relevant terms and injects a short `R
 Every policy hook emits a structured `extra-message-policy: decision_trace` log line. The JSON payload is safe for operational debugging and includes the route and policy fields needed to explain the decision:
 
 - `traceId`, `hook`, `messageId`, `accountId`, `guildId`, `channelId`, `threadId`, `parentChannelId`, `sessionKey`
-- `matchedRule`, `candidateRules`, `policySource`, `requireMention`, `mentionSatisfied`, `respond`, `ingestMode`
+- `matchedRule`, `candidateRules`, `policySource`, `requireMention`, `mentionRecall`, `mentionSatisfied`, `respond`, `ingestMode`
 - `decision`, `reason`, `handled`, `parentLookupStatus`, and `parentLookup`
 
 The plugin also registers these tools when the OpenClaw runtime exposes `api.registerTool`:

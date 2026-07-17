@@ -5,7 +5,8 @@ export const INGEST_MODES = Object.freeze(["none", "passive", "all", "responseCa
 export const DEFAULT_POLICY = Object.freeze({
   respond: true,
   ingestMode: "responseCandidates",
-  requireMention: false
+  requireMention: false,
+  mentionRecall: true
 });
 
 function asBool(value, fallback) {
@@ -59,6 +60,11 @@ export function normalizePolicy(raw = {}, fallback = DEFAULT_POLICY) {
     policy.requireMention = raw.requireMention;
   } else if (fallback.requireMention === true) {
     policy.requireMention = true;
+  }
+  if (typeof raw.mentionRecall === "boolean") {
+    policy.mentionRecall = raw.mentionRecall;
+  } else if (fallback.mentionRecall === false) {
+    policy.mentionRecall = false;
   }
   return policy;
 }
@@ -376,6 +382,7 @@ export function resolvePolicy(cfg, event = {}, ctx = {}) {
       respond: bestRule.respond,
       ingestMode: bestRule.ingestMode,
       ...(Object.prototype.hasOwnProperty.call(bestRule, "requireMention") ? { requireMention: bestRule.requireMention } : {}),
+      ...(Object.prototype.hasOwnProperty.call(bestRule, "mentionRecall") ? { mentionRecall: bestRule.mentionRecall } : {}),
       ...(bestRule.mentionTextRegex ? { mentionTextRegex: bestRule.mentionTextRegex } : {}),
       matched: describeRule(bestRule)
     }, event, ctx);

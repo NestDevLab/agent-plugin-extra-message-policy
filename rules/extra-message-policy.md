@@ -6,4 +6,5 @@ Policy intent shared by OpenClaw and Hermes runtimes:
 - never bypass agent allow-lists or pairing/authorization;
 - passive ingest must not imply a reply;
 - reply suppression must be explicit and auditable;
+- recalled mention facts may satisfy a mention gate only when `mentionRecall` is enabled;
 - raw recall must be bounded by days, match count, and character budget.

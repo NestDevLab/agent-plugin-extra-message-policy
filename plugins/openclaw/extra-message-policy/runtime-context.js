@@ -462,8 +462,10 @@ export function deriveMentionFact(event = {}, ctx = {}, cfg = {}, pluginConfig =
   return undefined;
 }
 
-export function withDerivedMentionFact(state, event = {}, ctx = {}, cfg = {}, pluginConfig = {}) {
-  const recalled = withRecalledMentionFact(state, event, ctx);
+export function withDerivedMentionFact(state, event = {}, ctx = {}, cfg = {}, pluginConfig = {}, options = {}) {
+  const recalled = options.mentionRecall === false
+    ? { event, ctx }
+    : withRecalledMentionFact(state, event, ctx);
   const replyMention = deriveNativeReplyMentionFact(recalled.event, recalled.ctx, cfg, pluginConfig);
   if (replyMention === true) {
     return {

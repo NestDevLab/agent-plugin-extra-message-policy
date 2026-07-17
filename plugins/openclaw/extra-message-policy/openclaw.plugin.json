@@ -302,6 +302,11 @@
               "all"
             ],
             "default": "off"
+          },
+          "mentionRecall": {
+            "type": "boolean",
+            "default": true,
+            "description": "Allow a mention fact recalled from an earlier hook to satisfy requireMention."
           }
         }
       },
@@ -380,6 +385,11 @@
           "requireMention": {
             "type": "boolean",
             "default": false
+          },
+          "mentionRecall": {
+            "type": "boolean",
+            "default": true,
+            "description": "Allow a mention fact recalled from an earlier hook to satisfy requireMention."
           }
         }
       },
@@ -432,6 +442,11 @@
           "requireMention": {
             "type": "boolean",
             "default": false
+          },
+          "mentionRecall": {
+            "type": "boolean",
+            "default": true,
+            "description": "Allow a mention fact recalled from an earlier hook to satisfy requireMention."
           }
         }
       }

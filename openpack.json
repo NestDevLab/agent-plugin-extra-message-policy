@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "name": "NestDevLab/agent-plugin-extra-message-policy",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "provides": [
     {
       "type": "plugins",

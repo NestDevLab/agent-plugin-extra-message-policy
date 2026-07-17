@@ -27,6 +27,13 @@ Defaults are installed as `settings/hermes-extra-message-policy.json` into `.her
 
 Default policy is conservative: enabled, respond allowed, no passive ingest sink unless configured.
 
+Both runtime implementations accept `mentionRecall` beside `requireMention` in
+the default policy and scoped rules. It defaults to `true` for compatibility.
+Set it to `false` when only mention evidence on the current message may satisfy
+`requireMention`; this does not change message ingest. Hermes currently has no
+internal cross-event mention cache, but honors recalled provenance supplied by
+an adapter (`mention_source: recalled` or equivalent evidence metadata).
+
 ## Companion X/Twitter tools
 
 This package governs chat ingest and chat replies. It does not replace OpenClaw tool allow-lists or review controls for plugins that call outside services.

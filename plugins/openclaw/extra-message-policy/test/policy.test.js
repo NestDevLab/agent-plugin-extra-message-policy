@@ -338,6 +338,17 @@ test("normalizers handle fallback values, disabled config, sinks, and anonymous 
   assert.equal(cfg.dedupeWindow, 1);
 });
 
+test("mentionRecall defaults true and supports per-rule overrides", () => {
+  const cfg = normalizeConfig({
+    defaultPolicy: { respond: true, ingestMode: "all", requireMention: true },
+    policies: [{ channelId: "strict", mentionRecall: false }]
+  });
+
+  assert.notEqual(cfg.defaultPolicy.mentionRecall, false);
+  assert.equal(resolvePolicy(cfg, {}, { channelId: "strict" }).mentionRecall, false);
+  assert.notEqual(resolvePolicy(cfg, {}, { channelId: "other" }).mentionRecall, false);
+});
+
 test("rule matching covers metadata aliases, prefixes, regexes, text regexes, and failures", () => {
   assert.equal(ruleMatches({ guildId: "guild-meta" }, {}, { metadata: { guildId: "guild-meta" } }), true);
   assert.equal(ruleMatches({ guildId: "guild-meta" }, {}, { metadata: { guildId: "other" } }), false);
