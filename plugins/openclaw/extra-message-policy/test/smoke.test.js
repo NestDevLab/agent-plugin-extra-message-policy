@@ -15,6 +15,9 @@ test("schema exposes response and ingest policy", () => {
   const policyRule = manifest.configSchema.definitions.policyRule.properties;
   assert.deepEqual(policyRule.ingestMode.enum, ["none", "passive", "all", "responseCandidates"]);
   assert.equal(policyRule.respond.type, "boolean");
+  assert.equal(policyRule.mentionRecall.default, true);
+  assert.equal(manifest.configSchema.definitions.policy.properties.mentionRecall.default, true);
+  assert.equal(manifest.configSchema.definitions.runtimePolicy.properties.mentionRecall.default, true);
   assert.deepEqual(manifest.configSchema.properties.jsonlSink.properties.shardBy.enum, ["none", "dayConversation"]);
 });
 

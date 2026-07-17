@@ -235,6 +235,34 @@ test("runtime always override does not require a mention", () => {
   assert.equal(effective.runtimeResponseMode, "always");
 });
 
+test("runtime policies can override mentionRecall without erasing the base setting", () => {
+  const configured = normalizePolicyCommandConfig({
+    policyCommand: {
+      applyDefault: true,
+      defaultPolicy: { responseMode: "mention", ingestMode: "all", mentionRecall: false }
+    }
+  });
+  const configuredOverride = resolveRuntimePolicyOverride(configured, {}, {}, ctx);
+  const configuredEffective = applyRuntimePolicy(
+    { respond: true, ingestMode: "all", requireMention: true, mentionRecall: true, matched: "config" },
+    configuredOverride,
+    { wasMentioned: false },
+    ctx
+  );
+  assert.equal(configuredEffective.mentionRecall, false);
+
+  const commandConfig = normalizePolicyCommandConfig({});
+  const result = applyRuntimeCommand(commandConfig, {}, {}, ctx, parsePolicyCommand("response mention"), "operator");
+  const commandOverride = resolveRuntimePolicyOverride(commandConfig, result.state, {}, ctx);
+  const inheritedEffective = applyRuntimePolicy(
+    { respond: true, ingestMode: "all", requireMention: true, mentionRecall: false, matched: "config" },
+    commandOverride,
+    { wasMentioned: false },
+    ctx
+  );
+  assert.equal(inheritedEffective.mentionRecall, false);
+});
+
 test("runtime ingest toggle creates passive ingest override", () => {
   const commandConfig = normalizePolicyCommandConfig({});
   const result = applyRuntimeCommand(commandConfig, {}, {}, ctx, parsePolicyCommand("ingest toggle"), "operator");

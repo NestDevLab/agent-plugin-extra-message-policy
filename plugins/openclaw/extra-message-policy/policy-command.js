@@ -253,10 +253,15 @@ function normalizeRuntimeIngestMode(value, fallback = DEFAULT_RUNTIME_POLICY.ing
 }
 
 function normalizeRuntimePolicy(raw = {}, fallback = DEFAULT_RUNTIME_POLICY) {
-  return {
+  const policy = {
     responseMode: normalizeResponseMode(raw.responseMode, fallback.responseMode),
     ingestMode: normalizeRuntimeIngestMode(raw.ingestMode, fallback.ingestMode)
   };
+  const mentionRecall = typeof raw.mentionRecall === "boolean"
+    ? raw.mentionRecall
+    : (typeof fallback.mentionRecall === "boolean" ? fallback.mentionRecall : undefined);
+  if (typeof mentionRecall === "boolean") policy.mentionRecall = mentionRecall;
+  return policy;
 }
 
 export function normalizePolicyCommandConfig(raw = {}) {
@@ -549,6 +554,7 @@ function runtimeToBasePolicy(runtimePolicy) {
     respond: responseMode !== "off",
     requireMention: responseMode === "mention" || responseMode === "firstTag",
     ingestMode: ingestMode === "off" ? "none" : ingestMode,
+    ...(typeof runtimePolicy.mentionRecall === "boolean" ? { mentionRecall: runtimePolicy.mentionRecall } : {}),
     runtimeResponseMode: responseMode,
     runtimeIngestMode: ingestMode
   };
@@ -581,6 +587,7 @@ export function applyRuntimePolicy(basePolicy, runtimeOverride, event = {}, ctx 
     respond: runtimeOverride.respond,
     ingestMode: runtimeOverride.ingestMode,
     ...(runtimeOverride.requireMention ? { requireMention: true } : { requireMention: false }),
+    ...(typeof runtimeOverride.mentionRecall === "boolean" ? { mentionRecall: runtimeOverride.mentionRecall } : {}),
     runtimeResponseMode: runtimeOverride.runtimeResponseMode,
     runtimeIngestMode: runtimeOverride.runtimeIngestMode,
     runtimeMatched: runtimeOverride.runtimeMatched,

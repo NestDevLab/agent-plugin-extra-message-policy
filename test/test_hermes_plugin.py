@@ -36,6 +36,11 @@ class MentionEvent(Event):
     mentions_bot = True
 
 
+class RecalledMentionEvent(Event):
+    mentions_bot = True
+    mention_source = "recalled"
+
+
 class PlatformEnum:
     value = "discord"
 
@@ -124,6 +129,23 @@ def test_passive_skip_jsonl_and_recall():
 def test_default_policy_is_mention_only_when_plugin_manages_gate():
     with hermes_home():
         assert mod.pre_gateway_dispatch(Event())["action"] == "skip"
+        assert mod.pre_gateway_dispatch(MentionEvent()) is None
+
+
+def test_mention_recall_false_rejects_recalled_only_mention_evidence():
+    with hermes_home() as h:
+        (h / "settings.json").write_text(json.dumps({
+            "extra_message_policy": {
+                "enabled": True,
+                "defaultPolicy": {
+                    "respond": True,
+                    "requireMention": True,
+                    "mentionRecall": False,
+                    "ingestMode": "responseCandidates",
+                },
+            }
+        }))
+        assert mod.pre_gateway_dispatch(RecalledMentionEvent())["action"] == "skip"
         assert mod.pre_gateway_dispatch(MentionEvent()) is None
 
 

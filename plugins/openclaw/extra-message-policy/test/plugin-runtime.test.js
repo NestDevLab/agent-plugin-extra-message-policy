@@ -215,6 +215,110 @@ test("recalled true mention overrides reduced dispatch false", async () => {
   assert.equal(dispatchTrace.mentionEvidence.derivedMention, true);
 });
 
+test("mentionRecall false suppresses an unmentioned follow-up after a real mention", async () => {
+  const botId = "111111111111111111";
+  const jsonlPath = path.join(os.tmpdir(), `extra-policy-${Date.now()}-mention-recall.jsonl`);
+  const harness = await createHarness({
+    defaultPolicy: {
+      respond: true,
+      ingestMode: "responseCandidates",
+      requireMention: true,
+      mentionRecall: false
+    },
+    jsonlSink: { enabled: true, path: jsonlPath },
+    mentionDetection: { accounts: { default: { botIds: [botId] } } }
+  }, {
+    channels: { discord: { accounts: { default: {} } } }
+  });
+
+  const ctx = {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "thread-1",
+    conversationId: "channel:thread-1",
+    sessionKey: "agent:main:discord:channel:thread-1",
+    senderId: "user-1"
+  };
+
+  const claim = await harness.emit("inbound_claim", {
+    messageId: "msg-no-recall-claim",
+    content: `<@${botId}> addressed turn`,
+    wasMentioned: false
+  }, { ...ctx, messageId: "msg-no-recall-claim" });
+  assert.equal(claim, undefined);
+
+  const dispatch = await harness.emit("before_dispatch", {
+    messageId: "msg-no-recall-follow-up",
+    content: "ok"
+  }, { ...ctx, messageId: "msg-no-recall-follow-up" });
+
+  assert.deepEqual(dispatch, { handled: true });
+  const dispatchTrace = harness.logs
+    .filter((entry) => entry.message.includes("decision_trace"))
+    .map((entry) => JSON.parse(entry.message.slice(entry.message.indexOf("{"))))
+    .findLast((trace) => trace.hook === "before_dispatch");
+  assert.equal(dispatchTrace.decision, "suppress");
+  assert.equal(dispatchTrace.reason, "mention_required");
+  assert.equal(dispatchTrace.mentionRecall, false);
+  assert.equal(dispatchTrace.mentionSatisfied, false);
+  assert.equal(dispatchTrace.mentionEvidence.recalledMentionMatch, false);
+  assert.equal(dispatchTrace.mentionEvidence.matchedBy.includes("recalled"), false);
+  const rows = await readJsonl(jsonlPath);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].source, "before_dispatch");
+  assert.equal(rows[0].content, "ok");
+});
+
+test("mentionRecall false still admits configured and reply-target mention evidence", async () => {
+  const botId = "111111111111111111";
+  const harness = await createHarness({
+    defaultPolicy: {
+      respond: true,
+      ingestMode: "responseCandidates",
+      requireMention: true,
+      mentionRecall: false
+    },
+    mentionDetection: { accounts: { default: { botIds: [botId] } } }
+  }, {
+    channels: { discord: { accounts: { default: {} } } }
+  });
+  const ctx = {
+    accountId: "default",
+    guildId: "guild-1",
+    channelId: "thread-1",
+    conversationId: "channel:thread-1",
+    sessionKey: "agent:main:discord:channel:thread-1",
+    senderId: "user-1"
+  };
+
+  const configured = await harness.emit("before_dispatch", {
+    messageId: "msg-configured-mention",
+    content: `<@${botId}> ping`
+  }, { ...ctx, messageId: "msg-configured-mention" });
+  assert.equal(configured, undefined);
+
+  const provider = await harness.emit("before_dispatch", {
+    messageId: "msg-provider-mention",
+    content: "provider-addressed turn",
+    wasMentioned: true
+  }, { ...ctx, messageId: "msg-provider-mention" });
+  assert.equal(provider, undefined);
+
+  const mentionArray = await harness.emit("before_dispatch", {
+    messageId: "msg-mention-array",
+    content: "array-addressed turn",
+    mentions: [{ id: botId }]
+  }, { ...ctx, messageId: "msg-mention-array" });
+  assert.equal(mentionArray, undefined);
+
+  const replyTarget = await harness.emit("before_dispatch", {
+    messageId: "msg-reply-target",
+    content: "following up",
+    metadata: { referenced_message: { author: { id: botId } } }
+  }, { ...ctx, messageId: "msg-reply-target" });
+  assert.equal(replyTarget, undefined);
+});
+
 test("decision trace mention evidence follows nested provider mention metadata", async () => {
   const harness = await createHarness({
     defaultPolicy: { respond: true, ingestMode: "none", requireMention: true }
@@ -1840,6 +1944,7 @@ test("policy audit tool lists accessible Discord channels with effective policy"
     const garden = accessible.details.channels.find((channel) => channel.id === "666666666666666666");
     assert.equal(garden.access, "readable");
     assert.equal(garden.policy.respond, true);
+    assert.equal(garden.policy.mentionRecall, true);
     const late = accessible.details.channels.find((channel) => channel.id === "1999999999999999999");
     assert.equal(late.access, "readable");
 

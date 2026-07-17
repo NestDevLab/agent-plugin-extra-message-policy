@@ -27,7 +27,7 @@ DEFAULT_CONFIG = {
     # plugin becomes the response gate: by default only an explicit bot mention
     # may reach the agent. Operators can opt specific threads/channels into
     # "always" via /policy response always.
-    "defaultPolicy": {"respond": True, "requireMention": True, "firstTagOnly": False, "ingestMode": "responseCandidates"},
+    "defaultPolicy": {"respond": True, "requireMention": True, "mentionRecall": True, "firstTagOnly": False, "ingestMode": "responseCandidates"},
     "policies": [],
     "jsonlSink": {"enabled": False, "path": "memory/extra-message-policy/messages.jsonl", "shardBy": "dayConversation"},
     "rawRecall": {"enabled": False, "appendGuidance": True, "maxMatches": 12, "maxContextChars": 6000, "maxDays": 30},
@@ -207,26 +207,46 @@ def _candidate_bot_ids(raw: Any) -> set[str]:
     return ids
 
 
-def _event_mentions_bot(event: Any) -> bool:
-    explicit = _get(event, "mentions_bot", None)
-    if explicit is not None:
-        return bool(explicit)
+def _event_mention_is_recalled(event: Any) -> bool:
+    source = str(
+        _get(event, "mention_source", None)
+        or _get(event, "mentionSource", None)
+        or ""
+    ).strip().lower()
+    if source == "recalled":
+        return True
+    if bool(_get(event, "mention_recalled", False) or _get(event, "recalledMention", False)):
+        return True
+    evidence = _get(event, "mention_evidence", None) or _get(event, "mentionEvidence", None)
+    matched_by = evidence.get("matchedBy", []) if isinstance(evidence, dict) else []
+    return "recalled" in matched_by
+
+
+def _event_mentions_bot(event: Any, mention_recall: bool = True) -> bool:
     raw = _raw_message(event)
     if raw is None:
         text = _get(event, "text", "") or ""
-        return bool(re.search(r"<@!?\d+>", text))
-    mention_ids = _raw_mention_ids(raw)
-    bot_ids = _candidate_bot_ids(raw)
-    if bot_ids:
-        return bool(mention_ids & bot_ids)
-    # Last-resort fallback for tests and non-Discord adapters: if the resolved
-    # mention list contains a bot account, treat it as an explicit bot mention.
-    return any(bool(getattr(mentioned, "bot", False)) for mentioned in getattr(raw, "mentions", []) or [])
+        if re.search(r"<@!?\d+>", text):
+            return True
+    else:
+        mention_ids = _raw_mention_ids(raw)
+        bot_ids = _candidate_bot_ids(raw)
+        if bot_ids and mention_ids & bot_ids:
+            return True
+        # Last-resort fallback for tests and non-Discord adapters: if the
+        # resolved mention list contains a bot account, treat it as explicit.
+        if any(bool(getattr(mentioned, "bot", False)) for mentioned in getattr(raw, "mentions", []) or []):
+            return True
+    if not mention_recall and _event_mention_is_recalled(event):
+        return False
+    explicit = _get(event, "mentions_bot", None)
+    return bool(explicit) if explicit is not None else False
 
 
-def _event_first_token_mentions_bot(event: Any) -> bool:
+def _event_first_token_mentions_bot(event: Any, mention_recall: bool = True) -> bool:
     explicit = _get(event, "first_tag_mentions_bot", None)
-    if explicit is not None:
+    recalled_blocked = not mention_recall and _event_mention_is_recalled(event)
+    if explicit is not None and not recalled_blocked:
         return bool(explicit)
     raw = _raw_message(event)
     content = ""
@@ -241,7 +261,9 @@ def _event_first_token_mentions_bot(event: Any) -> bool:
     m = re.fullmatch(r"<@!?(\d+)>", token)
     if m:
         return not bot_ids or m.group(1) in bot_ids
-    return token.startswith("@") and _event_mentions_bot(event)
+    if recalled_blocked:
+        return False
+    return token.startswith("@") and _event_mentions_bot(event, mention_recall)
 
 
 # ---------------------------------------------------------------------------
@@ -358,9 +380,9 @@ def _policy_allows_response(policy: dict[str, Any], event: Any) -> bool:
     if not bool(policy.get("respond", True)):
         return False
     if bool(policy.get("firstTagOnly")):
-        return _event_first_token_mentions_bot(event)
+        return _event_first_token_mentions_bot(event, policy.get("mentionRecall") is not False)
     if bool(policy.get("requireMention")):
-        return _event_mentions_bot(event)
+        return _event_mentions_bot(event, policy.get("mentionRecall") is not False)
     return True
 
 

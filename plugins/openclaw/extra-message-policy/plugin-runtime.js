@@ -840,6 +840,7 @@ function decisionTrace(state, cfg, hook, event = {}, ctx = {}, policy = {}, pare
     candidateRules: candidateRules(cfg, event, ctx),
     policySource: source,
     requireMention: policy.requireMention === true,
+    mentionRecall: policy.mentionRecall !== false,
     mentionSatisfied: typeof policy.mentionSatisfied === "boolean" ? policy.mentionSatisfied : null,
     respond: policy.respond === true,
     ingestMode: policy.ingestMode || null,
@@ -870,6 +871,7 @@ function formatSimulationText(trace) {
     `source=${trace.policySource}`,
     `respond=${trace.respond}`,
     `requireMention=${trace.requireMention}`,
+    `mentionRecall=${trace.mentionRecall}`,
     `mentionSatisfied=${trace.mentionSatisfied}`
   ].join("\n");
 }
@@ -904,13 +906,34 @@ export function registerExtraMessagePolicy(api, options = {}) {
     const hydrated = await withHydratedDiscordParent(state, routed.event, routed.ctx, currentConfig, api.logger);
     if (hydrated !== routed) rememberDiscordRoute(state, hydrated.event, hydrated.ctx);
     const recalledMention = recalledMentionFact(state, hydrated.event, hydrated.ctx);
-    const enriched = withDerivedMentionFact(
+    let enriched = withDerivedMentionFact(
       state,
       hydrated.event,
       hydrated.ctx,
       currentConfig,
-      currentPluginConfig
+      currentPluginConfig,
+      { mentionRecall: false }
     );
+    const runtimeState = await loadPolicyState(policyStatePath);
+    const resolveConfiguredPolicy = (candidate) => {
+      const basePolicy = resolvePolicy(cfg, candidate.event, candidate.ctx);
+      const runtimeOverride = resolveRuntimePolicyOverride(commandConfig, runtimeState, candidate.event, candidate.ctx);
+      const effectivePolicy = runtimeOverride
+        ? applyRuntimePolicy(basePolicy, runtimeOverride, candidate.event, candidate.ctx)
+        : basePolicy;
+      return { basePolicy, runtimeOverride, effectivePolicy };
+    };
+    let configured = resolveConfiguredPolicy(enriched);
+    if (configured.effectivePolicy.mentionRecall !== false) {
+      enriched = withDerivedMentionFact(
+        state,
+        hydrated.event,
+        hydrated.ctx,
+        currentConfig,
+        currentPluginConfig
+      );
+      configured = resolveConfiguredPolicy(enriched);
+    }
     // The Discord inbound_claim hook can see the raw message text and derive an
     // explicit <@bot_id> mention, while the later before_dispatch hook may only
     // receive a reduced context. Persist derived mention facts here so the
@@ -918,10 +941,7 @@ export function registerExtraMessagePolicy(api, options = {}) {
     if (typeof enriched.event?.wasMentioned === "boolean" || typeof enriched.ctx?.wasMentioned === "boolean") {
       rememberMentionFact(state, enriched.event, enriched.ctx);
     }
-    const basePolicy = resolvePolicy(cfg, enriched.event, enriched.ctx);
-    const runtimeState = await loadPolicyState(policyStatePath);
-    let runtimeOverride = resolveRuntimePolicyOverride(commandConfig, runtimeState, enriched.event, enriched.ctx);
-    let effectivePolicy = runtimeOverride ? applyRuntimePolicy(basePolicy, runtimeOverride, enriched.event, enriched.ctx) : basePolicy;
+    let { basePolicy, runtimeOverride, effectivePolicy } = configured;
     if (shouldPromoteFirstTagPolicy(effectivePolicy)) {
       const result = applyRuntimeCommand(
         commandConfig,
@@ -949,7 +969,7 @@ export function registerExtraMessagePolicy(api, options = {}) {
       currentConfig,
       currentPluginConfig,
       {
-        recalledMention,
+        recalledMention: policy.mentionRecall !== false && recalledMention === true,
         effectiveEvent: enriched.event,
         effectiveCtx: enriched.ctx,
         policy

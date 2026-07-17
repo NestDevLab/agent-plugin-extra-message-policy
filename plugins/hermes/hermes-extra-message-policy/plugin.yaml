@@ -1,5 +1,5 @@
 name: hermes-extra-message-policy
-version: 0.1.0
+version: 0.1.1
 description: Hermes gateway message policy, silent ingest, and bounded raw recall.
 provides_hooks:
   - pre_gateway_dispatch

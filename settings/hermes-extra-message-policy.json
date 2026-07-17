@@ -3,6 +3,7 @@
     "enabled": true,
     "defaultPolicy": {
       "respond": true,
+      "mentionRecall": true,
       "ingestMode": "responseCandidates"
     },
     "policies": [],

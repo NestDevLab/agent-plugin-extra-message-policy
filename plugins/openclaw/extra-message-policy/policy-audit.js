@@ -187,6 +187,7 @@ function policyForChannel(pluginConfig, openclawConfig, accountId, guildId, chan
     respond: effectivePolicy.respond,
     ingestMode: effectivePolicy.ingestMode,
     requireMention: effectivePolicy.requireMention === true,
+    mentionRecall: effectivePolicy.mentionRecall !== false,
     matched: effectivePolicy.matched,
     nativeMentionGate: effectivePolicy.nativeMentionGate === true
   };

@@ -4,6 +4,7 @@
       "enabled": true,
       "defaultPolicy": {
         "respond": true,
+        "mentionRecall": true,
         "ingestMode": "responseCandidates"
       },
       "policies": [
@@ -54,7 +55,8 @@
         "applyDefault": false,
         "defaultPolicy": {
           "responseMode": "off",
-          "ingestMode": "off"
+          "ingestMode": "off",
+          "mentionRecall": true
         }
       },
       "mentionDetection": {
