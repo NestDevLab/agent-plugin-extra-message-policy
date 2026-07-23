@@ -2,13 +2,14 @@ node_modules/
 *.log
 runtime/
 
+.agentwheel/cache/
+.agentwheel/lock.json
+*.pyc
+__pycache__/
+
 # syncwheel managed metadata
 .syncwheel/ledger/
 .syncwheel/profile.local.json
 .syncwheel/manifests/*.local.json
 .syncwheel/wt/
 # end syncwheel managed metadata
-.agentwheel/cache/
-.agentwheel/lock.json
-*.pyc
-__pycache__/

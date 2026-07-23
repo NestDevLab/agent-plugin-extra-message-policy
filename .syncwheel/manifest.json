@@ -10,9 +10,26 @@
     "branch": "main-integration",
     "base": "origin/main",
     "strategy": "cherry-pick",
-    "stacks": []
+    "stacks": [
+      "emp-openpack-release"
+    ]
   },
-  "stacks": [],
+  "stacks": [
+    {
+      "id": "emp-openpack-release",
+      "branch": "feat/emp-openpack-release",
+      "base": "main",
+      "target_remote": "origin",
+      "target_branch": "main",
+      "integration_branch": "main-integration",
+      "commits": [
+        "dbcc846800d0e7574258b6055729aacdf97a27b0"
+      ],
+      "meta": {
+        "purpose": "Normalize EMP as an OpenPack semver release"
+      }
+    }
+  ],
   "syncwheel_worktree_root": ".syncwheel/wt",
   "syncwheel_tracking": "git-tracked"
 }
