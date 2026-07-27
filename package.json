@@ -1,6 +1,6 @@
 {
   "name": "@nestdevlab/agent-plugin-extra-message-policy",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "description": "AgentWheel/OpenPack package for extra message policy across OpenClaw and Hermes runtimes.",
