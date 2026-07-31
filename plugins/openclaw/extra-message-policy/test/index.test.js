@@ -61,6 +61,13 @@ test("Discord SDK compat falls back to external plugin public surfaces", () => {
 
 test("Discord SDK compat resolves isolated OpenClaw npm project surfaces", async () => {
   const stateDir = await mkdtemp(path.join(os.tmpdir(), "extra-policy-discord-sdk-"));
+  const hostRoot = path.join(stateDir, "host-openclaw");
+  await mkdir(path.join(hostRoot, "dist"), { recursive: true });
+  await writeFile(path.join(hostRoot, "package.json"), JSON.stringify({
+    name: "openclaw",
+    version: "2026.6.11",
+    type: "module"
+  }));
   const packageRoot = path.join(
     stateDir,
     "npm",
@@ -96,7 +103,18 @@ test("Discord SDK compat resolves isolated OpenClaw npm project surfaces", async
     registerBuiltDiscordComponentMessage() {
       throw new Error("Unable to resolve bundled plugin public surface discord/runtime-api.js");
     }
-  }, { stateDir });
+  }, {
+    stateDir,
+    moduleRequire: Object.assign(
+      () => { throw new Error("external package is not linked below the core package"); },
+      {
+        resolve(specifier) {
+          if (specifier !== "openclaw") throw new Error(`unexpected resolve: ${specifier}`);
+          return path.join(hostRoot, "dist", "index.js");
+        }
+      }
+    )
+  });
 
   const payload = { spec: { blocks: [] } };
   assert.deepEqual(compat.buildDiscordComponentMessage(payload), {

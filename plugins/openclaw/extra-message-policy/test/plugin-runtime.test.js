@@ -1823,7 +1823,7 @@ test("golden flow: startup raw recall and registered search tool handle success 
     }
   });
 
-  const startup = await harness.emit("before_agent_start", { prompt: "falcon status" }, {
+  const startup = await harness.emit("before_prompt_build", { prompt: "falcon status" }, {
     conversationId: "channel:raw"
   });
   assert.match(startup.appendSystemContext, /Passive message raw ingest/);
@@ -1839,7 +1839,7 @@ test("golden flow: startup raw recall and registered search tool handle success 
       triggerPhrases: ["falcon"]
     }
   });
-  const noRecall = await failing.emit("before_agent_start", { prompt: "falcon status" }, {});
+  const noRecall = await failing.emit("before_prompt_build", { prompt: "falcon status" }, {});
   assert.match(noRecall.appendSystemContext, /Passive message raw ingest/);
   assert.equal(noRecall.prependContext, "");
 });
