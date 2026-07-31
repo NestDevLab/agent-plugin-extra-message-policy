@@ -1190,7 +1190,7 @@ export function registerExtraMessagePolicy(api, options = {}) {
     }
   }), { name: "simulate_extra_message_policy", optional: true });
 
-  api.on("before_agent_start", async (event, ctx) => {
+  api.on("before_prompt_build", async (event, ctx) => {
     const appendSystemContext = buildRawRecallGuidance(cfg.rawRecall);
     const prependContext = await searchRawRecall(event?.prompt || "", cfg.rawRecall, ctx).catch((err) => {
       api.logger.warn(`extra-message-policy: raw recall failed: ${String(err)}`);
