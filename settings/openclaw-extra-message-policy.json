@@ -1,0 +1,11 @@
+{
+  "plugins": {
+    "entries": {
+      "extra-message-policy": {
+        "hooks": {
+          "allowConversationAccess": true
+        }
+      }
+    }
+  }
+}

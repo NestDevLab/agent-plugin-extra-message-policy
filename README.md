@@ -21,9 +21,14 @@ agentwheel install . --adapter-config adapters/hermes-with-plugins.jsonc --dry-r
 
 OpenPack runtime selection is declared in `openpack.json` through `runtimes`.
 
-## Hermes config
+## Runtime config
 
-Defaults are installed as `settings/hermes-extra-message-policy.json` into `.hermes/settings.json` by AgentWheel. The plugin also reads `~/.hermes/settings.json` directly under `extra_message_policy`.
+OpenClaw installs `settings/openclaw-extra-message-policy.json` to grant the
+non-bundled plugin conversation access required by its `before_prompt_build`
+hook. Hermes defaults are installed as
+`settings/hermes-extra-message-policy.json` into `.hermes/settings.json` by
+AgentWheel. The Hermes plugin also reads `~/.hermes/settings.json` directly
+under `extra_message_policy`.
 
 Default policy is conservative: enabled, respond allowed, no passive ingest sink unless configured.
 
