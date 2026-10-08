@@ -278,3 +278,37 @@ The plugin posts the normalized ingest record as JSON.
 - `message_received` handles `ingestMode: "all"`.
 - `before_dispatch` handles `ingestMode: "responseCandidates"` and suppresses replies when `respond: false`.
 - `message_sending` is a defensive outbound guard for any reply associated with a suppressed dispatch, and applies native reply metadata when enabled.
+
+## Discord opt-out and raw archive retention
+
+`privacy.discordOptOut` maps a Discord bot account ID to sender snowflake IDs.
+For a listed sender, this plugin stops its own JSONL/HTTP ingestion and claims the
+inbound turn before dispatch. This rule is evaluated after the account and sender
+are identified and takes precedence over channel policies and runtime policy
+overrides. It does not remove existing records or control OpenClaw/provider
+stores outside this plugin.
+
+```jsonc
+{
+  "privacy": {
+    "discordOptOut": {
+      "default": ["123456789012345678"]
+    }
+  }
+}
+```
+
+The `retention-cli.js` utility handles only this plugin's JSONL archive. A
+dry-run is the default; use `--root /absolute/archive --account default
+--account another-bot --days 30 --manifest /private/plan.json` to write a
+0600 manifest containing paths, hashes, and counts but no message bodies.
+Malformed lines, missing account/sender/time, invalid UTF-8 and symlinks stop
+planning. A sender deletion can be included with `--sender-id <snowflake>`.
+
+Application requires the archive writer to be stopped and a separately
+reviewed deletion scope:
+`node retention-cli.js --apply --quiesced --manifest /private/plan.json`.
+It rechecks every file hash, takes an exclusive lock and atomically rewrites
+changed JSONL files. A fresh manifest is required if ingestion changed any
+file. This utility does not schedule retention, encrypt storage, process other
+transcripts or backups, or prove complete deletion from those systems.

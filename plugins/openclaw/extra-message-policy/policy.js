@@ -95,6 +95,13 @@ export function normalizeConfig(raw = {}) {
   };
   return {
     enabled: raw.enabled !== false,
+    privacy: {
+      discordOptOut: Object.fromEntries(
+        Object.entries(raw.privacy?.discordOptOut || {})
+          .filter(([accountId, ids]) => accountId && Array.isArray(ids))
+          .map(([accountId, ids]) => [accountId, ids.filter((id) => typeof id === "string" && /^\d{16,22}$/.test(id))])
+      )
+    },
     defaultPolicy,
     policies: Array.isArray(raw.policies)
       ? raw.policies.filter(Boolean).map((rule) => normalizePolicyRule(rule, defaultPolicy))

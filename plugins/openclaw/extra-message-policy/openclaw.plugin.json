@@ -23,6 +23,21 @@
         },
         "default": []
       },
+      "privacy": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "discordOptOut": {
+            "type": "object",
+            "description": "Discord sender snowflake IDs excluded per bot account from this plugin ingestion and dispatch.",
+            "additionalProperties": {
+              "type": "array",
+              "items": { "type": "string", "pattern": "^[0-9]{16,22}$" },
+              "uniqueItems": true
+            }
+          }
+        }
+      },
       "jsonlSink": {
         "type": "object",
         "additionalProperties": false,
