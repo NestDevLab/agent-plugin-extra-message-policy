@@ -491,8 +491,8 @@ function resolveJsonlPath(jsonlSink, record) {
 async function appendJsonl(jsonlSink, record) {
   const filePath = resolveJsonlPath(jsonlSink, record);
   const fullPath = path.resolve(process.cwd(), filePath);
-  await mkdir(path.dirname(fullPath), { recursive: true });
-  await appendFile(fullPath, `${JSON.stringify(record)}\n`, "utf8");
+  await mkdir(path.dirname(fullPath), { recursive: true, mode: 0o700 });
+  await appendFile(fullPath, `${JSON.stringify(record)}\n`, { encoding: "utf8", mode: 0o600 });
 }
 
 async function postHttpSink(httpSink, record) {
@@ -943,8 +943,21 @@ export function registerExtraMessagePolicy(api, options = {}) {
     diagnosticStartedAt: process.hrtime.bigint()
   };
 
+  const isDiscordOptedOut = (event = {}, ctx = {}) => {
+    const accountId = routeAccountId(event, ctx);
+    const senderId = textValue(event.senderId, event.SenderId, ctx.senderId, ctx.SenderId);
+    return isDiscordRoute(event, ctx) && Boolean(accountId && senderId && cfg.privacy.discordOptOut[accountId]?.includes(senderId));
+  };
+
   const resolveEffectiveDecision = async (event = {}, ctx = {}, hook = "unknown") => {
     const routed = withRememberedDiscordRoute(state, event, ctx);
+    if (isDiscordOptedOut(routed.event, routed.ctx)) {
+      return {
+        hook, event: routed.event, ctx: routed.ctx,
+        policy: { respond: false, ingestMode: "none", mentionRecall: false, matched: "privacy:discord-opt-out" },
+        mentionEvidence: {}, parentLookup: {}
+      };
+    }
     const currentConfig = api.runtime?.config?.current?.() || api.config || {};
     const currentPluginConfig = resolveCurrentPluginConfig(currentConfig, api.pluginConfig || {});
     const hydrated = await withHydratedDiscordParent(state, routed.event, routed.ctx, currentConfig, api.logger);
@@ -1201,10 +1214,10 @@ export function registerExtraMessagePolicy(api, options = {}) {
 
   api.on("inbound_claim", async (event, ctx) => {
     // inbound_claim runs before command routing and Codex/App Server dispatch.
-    if (isPolicyCommand(commandConfig, event, ctx)) return;
+    if (isPolicyCommand(commandConfig, event, ctx) && !isDiscordOptedOut(event, ctx)) return;
     rememberDiscordRoute(state, event, ctx);
     rememberMentionFact(state, event, ctx);
-    if (isLikelyTextCommand(event, ctx)) return;
+    if (isLikelyTextCommand(event, ctx) && !isDiscordOptedOut(event, ctx)) return;
     const decision = await resolveEffectiveDecision(event, ctx, "inbound_claim");
     if (shouldSuppressResponse(decision.policy)) {
       rememberResponsePolicy(state, decision.event, decision.ctx, decision.policy);
@@ -1217,7 +1230,7 @@ export function registerExtraMessagePolicy(api, options = {}) {
   }, { priority: 1000 });
 
   api.on("message_received", async (event, ctx) => {
-    if (isPolicyCommand(commandConfig, event, ctx)) return;
+    if (isPolicyCommand(commandConfig, event, ctx) && !isDiscordOptedOut(event, ctx)) return;
     rememberDiscordRoute(state, event, ctx);
     const decision = await resolveEffectiveDecision(event, ctx, "message_received");
     await ingest(api, cfg, state, "message_received", decision.event, decision.ctx, decision.policy);
@@ -1225,7 +1238,7 @@ export function registerExtraMessagePolicy(api, options = {}) {
   });
 
   api.on("before_dispatch", async (event, ctx) => {
-    if (isPolicyCommand(commandConfig, event, ctx)) return;
+    if (isPolicyCommand(commandConfig, event, ctx) && !isDiscordOptedOut(event, ctx)) return;
     rememberDiscordRoute(state, event, ctx);
     const decision = await resolveEffectiveDecision(event, ctx, "before_dispatch");
     rememberResponsePolicy(state, decision.event, decision.ctx, decision.policy);

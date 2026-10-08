@@ -1783,6 +1783,7 @@ test("golden flow: JSONL sharding, HTTP sink, dedupe, and sink failures", async 
     const shardPath = path.join(tmp, "2026", "05", "30", "channel_channel_with_spaces.jsonl");
     const rows = await readJsonl(shardPath);
 
+    assert.equal((await stat(shardPath)).mode & 0o777, 0o600);
     assert.equal(rows.length, 1);
     assert.equal(httpRecords.length, 1);
     assert.equal(httpRecords[0].url, "https://example.invalid/ingest");
@@ -2383,4 +2384,30 @@ test("policy command handler falls back to help for unknown action", async () =>
   });
 
   assert.match(result.text, /Usage: \/policy status/);
+});
+
+test("Discord opt-out overrides channel and runtime ingestion for its account only", async () => {
+  const tmp = await mkdtemp(path.join(os.tmpdir(), "extra-policy-optout-"));
+  const jsonlPath = path.join(tmp, "messages.jsonl");
+  const senderId = "123456789012345678";
+  const harness = await createHarness({
+    defaultPolicy: { respond: true, ingestMode: "all" },
+    policies: [{ channelId: "channel-1", respond: true, ingestMode: "all" }],
+    privacy: { discordOptOut: { default: [senderId] } },
+    jsonlSink: { enabled: true, path: jsonlPath }
+  });
+  const ctx = {
+    accountId: "default", senderId, channelId: "channel-1",
+    sessionKey: "agent:main:discord:channel:channel-1"
+  };
+  const event = { messageId: "optout-1", content: "synthetic" };
+  assert.deepEqual(await harness.emit("inbound_claim", event, ctx), { handled: true });
+  await harness.emit("message_received", event, ctx);
+  assert.deepEqual(await harness.emit("before_dispatch", event, ctx), { handled: true });
+  await assert.rejects(stat(jsonlPath), { code: "ENOENT" });
+
+  await harness.emit("message_received", { ...event, messageId: "other-account" }, {
+    ...ctx, accountId: "chromiecraft-bot"
+  });
+  assert.equal((await readJsonl(jsonlPath)).length, 1);
 });
