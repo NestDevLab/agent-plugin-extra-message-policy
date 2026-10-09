@@ -48,7 +48,7 @@ function classify(buffer, cutoffMs, accounts, senderIds) {
     if (!record || typeof record !== "object" || Array.isArray(record)) fail("invalid_record");
     const account = recordAccount(record);
     const time = timestampMs(record);
-    const sender = recordSender(record);
+    const sender = accounts.has(account) && senderIds.size ? recordSender(record) : "";
     const remove = accounts.has(account) && (time < cutoffMs || senderIds.has(sender));
     if (remove) {
       if (senderIds.has(sender)) optedOut += 1;

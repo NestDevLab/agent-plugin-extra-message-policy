@@ -302,8 +302,10 @@ The `retention-cli.js` utility handles only this plugin's JSONL archive. A
 dry-run is the default; use `--root /absolute/archive --account default
 --account another-bot --days 30 --manifest /private/plan.json` to write a
 0600 manifest containing paths, hashes, and counts but no message bodies.
-Malformed lines, missing account/sender/time, invalid UTF-8 and symlinks stop
-planning. A sender deletion can be included with `--sender-id <snowflake>`.
+Malformed lines, missing account/time, invalid UTF-8 and symlinks stop
+planning. Age-only retention accepts records without a sender ID. A sender
+deletion can be included with `--sender-id <snowflake>`; for that operation, a
+missing sender ID on a target-account record stops planning.
 
 Application requires the archive writer to be stopped and a separately
 reviewed deletion scope:
