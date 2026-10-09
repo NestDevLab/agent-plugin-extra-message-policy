@@ -49,3 +49,20 @@ test("apply refuses a changed archive and leaves it intact", async () => {
   await assert.rejects(applyRetention(manifest, { quiesced: true }), /archive_changed/);
   assert.equal(await readFile(file, "utf8"), changed);
 });
+
+
+test("age-only retention accepts real-schema records with no sender ID", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "retention-no-sender-"));
+  const file = path.join(root, "mixed.jsonl");
+  const old = JSON.stringify({ accountId: "default", timestamp: CUTOFF - 1, content: "expired" });
+  const current = JSON.stringify({ accountId: "default", timestamp: CUTOFF, content: "current" });
+  await writeFile(file, `${old}\n${current}\n`);
+  const manifest = await planRetention({ root, accounts: ["default"], now: NOW });
+  assert.deepEqual([manifest.files[0].expired, manifest.files[0].retained], [1, 1]);
+  await assert.rejects(
+    planRetention({ root, accounts: ["default"], senderIds: ["222222222222222222"], now: NOW }),
+    /missing_sender/
+  );
+  assert.deepEqual(await applyRetention(manifest, { quiesced: true }), { changedFiles: 1, removedRecords: 1 });
+  assert.equal(await readFile(file, "utf8"), `${current}\n`);
+});
