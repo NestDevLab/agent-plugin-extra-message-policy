@@ -973,6 +973,9 @@ export function registerExtraMessagePolicy(api, options = {}) {
   }, { priority: 1000 });
 
   api.on("before_agent_run", async (event, ctx) => {
+    // Final-model hooks do not guarantee guild metadata or an earlier route cache.
+    // Only explicitly isolated agents carry this final fail-closed defense.
+    if (!cfg.discordChannelScopes.some(scope => scope.agentIds.includes(scopeRoute(event, ctx).agentId))) return;
     const admission = await checkScope(event, ctx);
     if (admission.protected && !admission.allowed) return {
       outcome: "block", reason: "Discord channel scope could not be verified",

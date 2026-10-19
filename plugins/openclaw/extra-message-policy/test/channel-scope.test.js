@@ -34,3 +34,9 @@ test('invalid mandatory config fails startup rather than silently dropping the s
 test('later opt-out excludes even previously admitted raw records',()=>{
   assert.equal(admittedRecallRecord({...base,channelScopeAdmission:1,senderId:'400'},scopes,{agentId:'isolated'},{public:['400']}),false);
 });
+test('only positively identified direct contexts bypass guild admission',()=>{
+ assert.equal(admitChannelScope(scopes,{accountId:'public',content:'DM'}, {ChatType:'direct'}).protected,false);
+ assert.equal(admitChannelScope(scopes,{accountId:'public',content:'DM'}, {sessionKey:'agent:legacy:discord:direct:400'}).protected,false);
+ assert.equal(admitChannelScope(scopes,{accountId:'public',content:'ambiguous',isGroup:false},{}).allowed,false);
+ assert.equal(admitChannelScope(scopes,{accountId:'public',content:'ambiguous'},{agentId:'isolated',ChatType:'direct'}).allowed,false);
+});
