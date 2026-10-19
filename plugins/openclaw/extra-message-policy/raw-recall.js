@@ -1,4 +1,4 @@
-import { admittedRecallRecord } from "./channel-scope.js";
+import { admittedRecallRecord, recallChannelScope } from "./channel-scope.js";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
@@ -36,10 +36,10 @@ export function normalizeRawRecallConfig(raw = {}, jsonlSink = {}) {
   };
 }
 
-export function buildRawRecallGuidance(cfg) {
+export function buildRawRecallGuidance(cfg, ctx = {}) {
   if (!cfg?.enabled || !cfg?.appendGuidance) return "";
   const root = cfg.rootPath || "memory/discord/raw";
-  const toolLine = cfg.discordChannelScopes?.length
+  const toolLine = recallChannelScope(cfg.discordChannelScopes, ctx)
     ? "Use only search_raw_context for archive recall; direct file access and other memory sources are not authorized by this scope."
     : cfg.tool?.enabled === false
     ? "If more detail is needed and file tools are available, inspect the relevant JSONL shards directly before answering."

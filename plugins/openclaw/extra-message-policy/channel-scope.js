@@ -64,9 +64,12 @@ export function admitChannelScope(scopes, event = {}, ctx = {}) {
     !hasUnverifiedSupplementalContext(event, ctx);
   return { allowed: Boolean(allowed), protected: true, scope, route };
 }
-export function admittedRecallRecord(record, scopes, ctx = {}, discordOptOut = {}) {
+export function recallChannelScope(scopes, ctx = {}) {
   const route = scopeRoute({}, ctx);
-  const scope = (scopes || []).find(s => s.agentIds.includes(route.agentId) || (route.accountId === s.accountId && route.guildId === s.guildId));
+  return (scopes || []).find(s => s.agentIds.includes(route.agentId) || (route.accountId === s.accountId && route.guildId === s.guildId));
+}
+export function admittedRecallRecord(record, scopes, ctx = {}, discordOptOut = {}) {
+  const scope = recallChannelScope(scopes, ctx);
   if (!scope) return true; // Preserve unrelated guild/agent recall behavior.
   // Old mixed records may already contain flattened quotes. Only post-boundary
   // records have the sink admission stamp; no migration invents provenance.

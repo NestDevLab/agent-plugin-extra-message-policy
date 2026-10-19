@@ -2473,3 +2473,10 @@ test('uncached unrelated agent final hooks pass with SecretRef while isolated ag
  const outside={accountId,guildId:'111111111111111111',channelId:'333333333333333333',content:'/help'};
  assert.deepEqual(await harness.emit('inbound_claim',outside,{accountId,channelId:outside.channelId}),{handled:true});
 });
+test('before_prompt_build scopes guidance using native agent context',async()=>{
+ const harness=await createHarness({discordChannelScopes:[{accountId:'public',guildId:'111111111111111111',channelIds:['222222222222222222'],agentIds:['isolated']}]});
+ const lab=await harness.emit('before_prompt_build',{prompt:'hello'},{agentId:'lab'});
+ const isolated=await harness.emit('before_prompt_build',{prompt:'hello'},{agentId:'isolated'});
+ assert.doesNotMatch(lab.appendSystemContext,/Use only search_raw_context/);
+ assert.match(isolated.appendSystemContext,/Use only search_raw_context/);
+});
