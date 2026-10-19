@@ -213,3 +213,13 @@ test('protected automatic and tool recall cannot broaden mandatory admission via
     assert.equal(normal.details.matches.length,2);
   } finally {await rm(tmp,{recursive:true,force:true});}
 });
+
+test('mandatory archive guidance changes only protected contexts',()=>{
+ const baseline=normalizeRawRecallConfig({rootPath:'/synthetic/archive'});
+ const scoped={...baseline,discordChannelScopes:[{accountId:'public',guildId:'100',channelIds:['200'],agentIds:['isolated']}]};
+ const lab={agentId:'lab',accountId:'public',guildId:'101'};
+ assert.equal(buildRawRecallGuidance(scoped,lab),buildRawRecallGuidance(baseline,lab));
+ assert.equal(buildRawRecallGuidance(scoped,{agentId:'lab',accountId:'public'}),buildRawRecallGuidance(baseline));
+ assert.equal(buildRawRecallGuidance(scoped),buildRawRecallGuidance(baseline));
+ assert.match(buildRawRecallGuidance(scoped,{agentId:'isolated'}),/Use only search_raw_context/);
+});
