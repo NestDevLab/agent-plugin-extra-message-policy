@@ -453,7 +453,7 @@ function toRecord(source, event = {}, ctx = {}, policy = {}) {
     source,
     ...(policy.channelScopeAdmission ? { channelScopeAdmission: 1, guildId: routeGuildId(event, ctx), parentChannelId: routeParentChannelId(event, ctx) } : {}),
     observedAt: new Date().toISOString(),
-    channelId: ctx.channelId ?? ctx.ChannelId ?? ctx.NativeChannelId ?? event.channelId ?? event.ChannelId ?? event.NativeChannelId ?? event.channel ?? event.from,
+    channelId: policy.channelScopeAdmission ? scopeRoute(event, ctx).channelId : (ctx.channelId ?? ctx.ChannelId ?? ctx.NativeChannelId ?? event.channelId ?? event.ChannelId ?? event.NativeChannelId ?? event.channel ?? event.from),
     accountId: ctx.accountId ?? ctx.AccountId ?? event.accountId ?? event.AccountId,
     conversationId: ctx.conversationId ?? ctx.OriginatingTo ?? ctx.To ?? event.conversationId ?? event.OriginatingTo ?? event.To,
     sessionKey: ctx.sessionKey ?? ctx.SessionKey ?? event.sessionKey ?? event.SessionKey,

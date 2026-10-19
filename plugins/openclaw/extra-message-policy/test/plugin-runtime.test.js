@@ -2445,3 +2445,22 @@ test('protected agent tool hook blocks alternate memory and file paths',async()=
   assert.equal(await harness.emit('before_tool_call',{toolName:'search_raw_context'},{agentId:'isolated'}),undefined);
   assert.equal(await harness.emit('before_tool_call',{toolName:'read'},{agentId:'cclab'}),undefined);
 });
+test('native provider contexts retain numeric sink provenance and support later model routing',async()=>{
+ const accountId='public',guildId='111111111111111111',channelId='222222222222222222',threadId='333333333333333333';
+ const sink=path.join(await mkdtemp(path.join(os.tmpdir(),'native-scope-')),'messages.jsonl');
+ const harness=await createHarness({defaultPolicy:{respond:true,ingestMode:'all'},jsonlSink:{enabled:true,path:sink},discordChannelScopes:[{accountId,guildId,channelIds:[channelId],agentIds:['isolated']}]});
+ for(const [id,parent] of [[channelId,undefined],[threadId,channelId]]) {
+  const sessionKey=`agent:isolated:discord:channel:${id}`;
+  const event={messageId:id,content:'admitted local message',metadata:{guildId,parentChannelId:parent}};
+  const ctx={accountId,channelId:'discord',conversationId:`channel:${id}`,sessionKey,agentId:'isolated'};
+  assert.equal(await harness.emit('inbound_claim',event,ctx),undefined);
+  await harness.emit('message_received',event,ctx);
+  assert.equal(await harness.emit('before_agent_run',{accountId,channelId:id,prompt:'local'}, {agentId:'isolated',accountId,channelId:id,sessionKey}),undefined);
+ }
+ const rows=await readJsonl(sink);assert.deepEqual(rows.map(x=>x.channelId),[channelId,threadId]);
+ assert.equal(rows[1].parentChannelId,channelId);
+ const lab={accountId,guildId:'444444444444444444',channelId:'555555555555555555',agentId:'lab',sessionKey:'agent:lab:discord:channel:555555555555555555'};
+ assert.equal(await harness.emit('inbound_claim',{content:'normal'},lab),undefined);
+ assert.equal(await harness.emit('before_agent_run',{accountId,channelId:lab.channelId},{...lab,guildId:undefined}),undefined);
+ assert.equal((await harness.emit('before_agent_run',{accountId:'other',channelId},{agentId:'isolated',sessionKey:`agent:isolated:discord:channel:${channelId}`})).outcome,'block');
+});
