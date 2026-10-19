@@ -320,7 +320,10 @@ transcripts or backups, or prove complete deletion from those systems.
 
 `discordChannelScopes` contains `{accountId, guildId, channelIds, agentIds?}` entries.
 It is an admission boundary before mutable policy rules, commands, raw sinks and
-model dispatch. Exact roots and native parent metadata for their threads are
+model dispatch. The final `before_agent_run` defense targets only explicit
+`agentIds`; unrelated agents do not need a guild/cache at that late hook. Positively
+identified native DM contexts stay outside guild scopes; missing guild alone does
+not identify a DM. Exact roots and native parent metadata for their threads are
 admitted. Missing provenance fails closed for protected agents/accounts. Keep
 `includeThreadStarter:false`, `historyLimit:0` and thread parent-session inheritance
 disabled in native configuration. Automatic quote/starter/forward contexts without

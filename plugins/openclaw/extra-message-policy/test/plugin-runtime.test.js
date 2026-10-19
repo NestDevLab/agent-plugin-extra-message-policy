@@ -2464,3 +2464,12 @@ test('native provider contexts retain numeric sink provenance and support later 
  assert.equal(await harness.emit('before_agent_run',{accountId,channelId:lab.channelId},{...lab,guildId:undefined}),undefined);
  assert.equal((await harness.emit('before_agent_run',{accountId:'other',channelId},{agentId:'isolated',sessionKey:`agent:isolated:discord:channel:${channelId}`})).outcome,'block');
 });
+test('uncached unrelated agent final hooks pass with SecretRef while isolated agents fail closed',async()=>{
+ const accountId='public',channelId='222222222222222222';
+ const harness=await createHarness({discordChannelScopes:[{accountId,guildId:'111111111111111111',channelIds:[channelId],agentIds:['isolated']}]},{channels:{discord:{accounts:{public:{token:{source:'env',provider:'default',id:'TEST_TOKEN_REFERENCE'}}}}}});
+ const event={accountId,channelId,prompt:'current request'};
+ assert.equal(await harness.emit('before_agent_run',event,{accountId,channelId,agentId:'lab',sessionKey:`agent:lab:discord:channel:${channelId}`}),undefined);
+ assert.equal((await harness.emit('before_agent_run',event,{accountId,channelId,agentId:'isolated',sessionKey:`agent:isolated:discord:channel:${channelId}`})).outcome,'block');
+ const outside={accountId,guildId:'111111111111111111',channelId:'333333333333333333',content:'/help'};
+ assert.deepEqual(await harness.emit('inbound_claim',outside,{accountId,channelId:outside.channelId}),{handled:true});
+});

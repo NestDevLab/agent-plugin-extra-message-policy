@@ -27,8 +27,11 @@ export function scopeRoute(event = {}, ctx = {}) {
 }
 export function activeChannelScope(scopes = [], event = {}, ctx = {}) {
   const route = scopeRoute(event, ctx);
+  const session = value(ctx.sessionKey, ctx.SessionKey, event.sessionKey, event.SessionKey);
+  const knownDirect = ctx.ChatType === 'direct' || event.ChatType === 'direct' ||
+    /^agent:[^:]+:discord:direct:[^:]+$/.test(session);
   return scopes.find(scope => scope.agentIds.includes(route.agentId) ||
-    (route.accountId === scope.accountId && (!route.guildId || route.guildId === scope.guildId)));
+    (!knownDirect && route.accountId === scope.accountId && (!route.guildId || route.guildId === scope.guildId)));
 }
 const externalKeys = new Set([
   'ReplyToId', 'ReplyToIdFull', 'ReplyToBody', 'ReplyToSender', 'ReplyToIsQuote', 'replyToId', 'replyToIdFull', 'replyToBody', 'replyToSender', 'replyToIsQuote',
