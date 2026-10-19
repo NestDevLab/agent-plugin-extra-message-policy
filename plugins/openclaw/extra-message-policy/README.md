@@ -341,3 +341,20 @@ tool enforce mandatory admission independently of caller search filters. Protect
 recall accepts only new records stamped after scope admission; historical mixed
 records are preserved but excluded. This does not delete historical data, provide
 complete sender opt-out, or enforce restrictions on unrelated agents/guilds.
+
+Normal Discord dispatch does not invoke a global `inbound_claim`. Mandatory
+admission therefore resolves missing channel ancestry independently through a
+bounded Discord metadata GET using the account's existing literal token or an
+approved default environment SecretRef. ID, guild, thread type and allowed parent
+must match. Missing credentials, unsupported providers and failed lookup deny the
+turn; unsuccessful lookups are not retained forever. Concurrent hooks share an
+in-flight lookup. Unrelated guilds keep their legacy lookup behavior.
+
+A separate mandatory provenance cache never consumes legacy inferred model-parent
+session keys. Native `parentConversationId` (channel:<snowflake> or bare snowflake)
+is supported for plugin-owned claims, but normal delivery does not depend on that
+hook. Protected archives are written only by full `message_received` events;
+reduced dispatch events neither write JSONL/HTTP nor consume dedupe keys. The full
+`reply_dispatch` context is gated before model/persistence, including supplemental
+media omitted from the reduced dispatch projection. Do not infer ancestry from
+user text, channel names or inherited model transcripts.

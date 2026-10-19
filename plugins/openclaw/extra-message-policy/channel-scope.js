@@ -14,6 +14,9 @@ export function normalizeChannelScopes(raw) {
     return { accountId: String(scope.accountId), guildId: String(scope.guildId), channelIds: [...new Set(scope.channelIds)], agentIds: scope.agentIds || [] };
   });
 }
+export function transportParentConversationId(input) {
+  return typeof input === 'string' ? /^(?:channel:)?(\d{16,22})$/.exec(input)?.[1] || '' : '';
+}
 export function scopeRoute(event = {}, ctx = {}) {
   const meta = { ...event.metadata, ...ctx.metadata };
   const session = value(ctx.sessionKey, ctx.SessionKey, event.sessionKey, event.SessionKey);
@@ -21,7 +24,7 @@ export function scopeRoute(event = {}, ctx = {}) {
     accountId: value(ctx.accountId, ctx.AccountId, event.accountId, event.AccountId, meta.accountId),
     guildId: value(ctx.rawGuildId, ctx.GroupSpace, ctx.guildId, event.rawGuildId, event.guildId, meta.rawGuildId, meta.guildId, meta.guild_id),
     channelId: snowflake(ctx.NativeChannelId, ctx.ChannelId, ctx.channelId, event.channelId, event.ChannelId, meta.channelId, meta.channel_id, ctx.conversationId, event.conversationId, session.match(/:channel:([^:]+)/)?.[1]),
-    parentChannelId: value(ctx.parentChannelId, ctx.ParentChannelId, ctx.ThreadParentId, event.parentChannelId, meta.parentChannelId, meta.threadParentId, meta.thread_parent_id),
+    parentChannelId: snowflake(ctx.parentChannelId, ctx.ParentChannelId, ctx.ThreadParentId, event.parentChannelId, meta.parentChannelId, meta.threadParentId, meta.thread_parent_id, transportParentConversationId(ctx.parentConversationId), transportParentConversationId(event.parentConversationId)),
     agentId: value(ctx.agentId, ctx.AgentId, event.agentId, session.match(/^agent:([^:]+):/)?.[1])
   };
 }
@@ -36,7 +39,7 @@ export function activeChannelScope(scopes = [], event = {}, ctx = {}) {
 const externalKeys = new Set([
   'ReplyToId', 'ReplyToIdFull', 'ReplyToBody', 'ReplyToSender', 'ReplyToIsQuote', 'replyToId', 'replyToIdFull', 'replyToBody', 'replyToSender', 'replyToIsQuote',
   'ThreadStarterBody', 'threadStarterBody', 'starterBody', 'quote', 'quotedMessage',
-  'ThreadHistoryBody', 'threadHistoryBody', 'media', 'originalMedia', 'mediaStagingPending', 'MediaPath', 'MediaPaths', 'MediaUrl', 'MediaUrls', 'MediaType', 'MediaTypes', 'referenced_message', 'referencedMessage', 'message_reference', 'messageReference',
+  'ThreadHistoryBody', 'threadHistoryBody', 'media', 'originalMedia', 'mediaStagingPending', 'MediaPath', 'MediaPaths', 'MediaUrl', 'MediaUrls', 'MediaType', 'MediaTypes', 'mediaPath', 'mediaPaths', 'mediaUrl', 'mediaUrls', 'mediaType', 'mediaTypes', 'referenced_message', 'referencedMessage', 'message_reference', 'messageReference',
   'message_snapshots', 'messageSnapshots', 'ForwardedFrom', 'ForwardedFromId', 'forwarded',
   'forwardedFrom', 'replyContext', 'replyTo', 'quotedAttachments'
 ]);

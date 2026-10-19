@@ -2480,3 +2480,70 @@ test('before_prompt_build scopes guidance using native agent context',async()=>{
  assert.doesNotMatch(lab.appendSystemContext,/Use only search_raw_context/);
  assert.match(isolated.appendSystemContext,/Use only search_raw_context/);
 });
+test('first native thread claim admits parentConversationId with SecretRef and no route cache',async()=>{
+ const accountId='public',guildId='111111111111111111',parentId='222222222222222222',threadId='333333333333333333';
+ const sink=path.join(await mkdtemp(path.join(os.tmpdir(),'first-native-thread-')),'messages.jsonl');
+ const harness=await createHarness({defaultPolicy:{respond:true,ingestMode:'all'},jsonlSink:{enabled:true,path:sink},discordChannelScopes:[{accountId,guildId,channelIds:[parentId],agentIds:['isolated']}]},{channels:{discord:{accounts:{public:{token:{source:'env',provider:'default',id:'TEST_TOKEN_REFERENCE'}}}}}});
+ const sessionKey=`agent:isolated:discord:channel:${threadId}`;
+ const event={content:'first ordinary forum post',messageId:'native-first',sessionKey,threadId,metadata:{guildId,to:`channel:${threadId}`}};
+ const ctx={channelId:'discord',accountId,conversationId:`channel:${threadId}`,sessionKey,agentId:'isolated'};
+ await harness.emit('message_received',event,ctx); // This reduced hook has no ancestry yet.
+ assert.equal(await stat(sink).catch(()=>null),null);
+ const claimEvent={...event,parentConversationId:`channel:${parentId}`};
+ const claimCtx={...ctx,parentConversationId:`channel:${parentId}`};
+ assert.equal(await harness.emit('inbound_claim',claimEvent,claimCtx),undefined);
+ await harness.emit('message_received',event,ctx);
+ assert.equal(await harness.emit('before_dispatch',{content:event.content,messageId:'native-first'},ctx),undefined);
+ const rows=await readJsonl(sink);assert.equal(rows.length,1);assert.equal(rows[0].parentChannelId,parentId);assert.equal(rows[0].channelId,threadId);assert.equal(rows[0].channelScopeAdmission,1);
+ assert.equal(await harness.emit('before_agent_run',{accountId,channelId:threadId,prompt:'local'},ctx),undefined);
+ const outside=await createHarness({defaultPolicy:{respond:true,ingestMode:'all'},discordChannelScopes:[{accountId,guildId,channelIds:[parentId],agentIds:['isolated']}]});
+ assert.deepEqual(await outside.emit('inbound_claim',{...event,parentConversationId:'channel:444444444444444444'},{...ctx,parentConversationId:'channel:444444444444444444'}),{handled:true});
+});
+
+test('normal first-thread pipeline uses bounded metadata lookup without claim or prior cache',async(t)=>{
+ const accountId='public',guildId='111111111111111111',parentId='222222222222222222',threadId='333333333333333333';
+ const previousFetch=globalThis.fetch,previousEnv=process.env.EMP_TEST_SCOPE_TOKEN;
+ t.after(()=>{globalThis.fetch=previousFetch;if(previousEnv===undefined) delete process.env.EMP_TEST_SCOPE_TOKEN;else process.env.EMP_TEST_SCOPE_TOKEN=previousEnv;});
+ process.env.EMP_TEST_SCOPE_TOKEN='synthetic-only';let calls=0;
+ globalThis.fetch=async(url,options)=>{calls++;assert.equal(url,`https://discord.com/api/v10/channels/${threadId}`);assert.equal(options.headers.authorization,'Bot synthetic-only');assert.ok(options.signal);await new Promise(r=>setTimeout(r,20));return {ok:true,json:async()=>({id:threadId,guild_id:guildId,parent_id:parentId,type:11})};};
+ const sink=path.join(await mkdtemp(path.join(os.tmpdir(),'normal-native-thread-')),'messages.jsonl');
+ const plugin={defaultPolicy:{respond:true,ingestMode:'all'},jsonlSink:{enabled:true,path:sink},discordChannelScopes:[{accountId,guildId,channelIds:[parentId],agentIds:['isolated']}]};
+ const runtime={channels:{discord:{accounts:{public:{token:{source:'env',provider:'default',id:'EMP_TEST_SCOPE_TOKEN'}}}}}};
+ const harness=await createHarness(plugin,runtime);
+ const sessionKey=`agent:isolated:discord:channel:${threadId}`;
+ const ctx={channelId:'discord',accountId,conversationId:threadId,sessionKey,agentId:'isolated'};
+ const event={content:'first ordinary thread message',messageId:'normal-first',sessionKey,threadId,metadata:{guildId,to:`channel:${threadId}`}};
+ const received=harness.emit('message_received',event,ctx); // Native fire-and-forget ordering.
+ assert.equal(await harness.emit('before_dispatch',{content:event.content,messageId:event.messageId},ctx),undefined);
+ assert.equal(await harness.emit('reply_dispatch',{ctx:{AccountId:accountId,GroupSpace:guildId,NativeChannelId:threadId,ThreadParentId:parentId,SessionKey:sessionKey,BodyForAgent:event.content}}),undefined);
+ assert.equal(await harness.emit('before_agent_run',{accountId,channelId:threadId,prompt:event.content},{accountId,channelId:threadId,sessionKey,agentId:'isolated'}),undefined);
+ await received;
+ const rows=await readJsonl(sink);assert.equal(rows.length,1);assert.equal(rows[0].source,'message_received');assert.equal(rows[0].parentChannelId,parentId);assert.equal(rows[0].channelScopeAdmission,1);assert.equal(calls,1);
+ // Full received/reply contexts alone expose media. Reduced dispatch must not
+ // write or consume dedupe before the received task has inspected it.
+ const mediaReceived=harness.emit('message_received',{...event,messageId:'media',media:[{path:'/synthetic-outside-media'}]},ctx);
+ assert.equal(await harness.emit('before_dispatch',{content:'attachment caption',messageId:'media'},ctx),undefined);
+ assert.equal((await harness.emit('reply_dispatch',{ctx:{AccountId:accountId,GroupSpace:guildId,NativeChannelId:threadId,ThreadParentId:parentId,SessionKey:sessionKey,BodyForAgent:'attachment caption',media:[{path:'/synthetic-outside-media'}]}})).handled,true);
+ await mediaReceived;assert.equal((await readJsonl(sink)).length,1);
+ // Legacy model-parent inference cannot promote mandatory scope provenance.
+ globalThis.fetch=async()=>({ok:false,status:403});
+ const denied=await createHarness(plugin,runtime);
+ const weak={...ctx,ModelParentSessionKey:`agent:isolated:discord:channel:${parentId}`};
+ assert.deepEqual(await denied.emit('before_dispatch',{content:'unverified'},weak),{handled:true});
+});
+
+test('mandatory metadata lookup fails closed on identity/guild/type/parent errors and invalid SecretRefs',async(t)=>{
+ const previousFetch=globalThis.fetch,previousEnv=process.env.EMP_TEST_SCOPE_TOKEN;t.after(()=>{globalThis.fetch=previousFetch;if(previousEnv===undefined) delete process.env.EMP_TEST_SCOPE_TOKEN;else process.env.EMP_TEST_SCOPE_TOKEN=previousEnv;});process.env.EMP_TEST_SCOPE_TOKEN='synthetic-only';
+ const accountId='public',guildId='111111111111111111',parentId='222222222222222222',threadId='333333333333333333';
+ const plugin={defaultPolicy:{respond:true,ingestMode:'all'},discordChannelScopes:[{accountId,guildId,channelIds:[parentId],agentIds:['isolated']}]};
+ const valid={id:threadId,guild_id:guildId,parent_id:parentId,type:11};const ctx={accountId,channelId:'discord',conversationId:threadId,agentId:'isolated'};const event={content:'normal',metadata:{guildId}};
+ const runtime=binding=>({channels:{discord:{accounts:{public:{token:binding}}}}});const binding={source:'env',provider:'default',id:'EMP_TEST_SCOPE_TOKEN'};
+ for(const change of [{id:parentId},{guild_id:'444444444444444444'},{parent_id:'444444444444444444'},{type:0}]){
+  globalThis.fetch=async()=>({ok:true,json:async()=>({...valid,...change})});const h=await createHarness(plugin,runtime(binding));assert.deepEqual(await h.emit('before_dispatch',event,ctx),{handled:true});
+ }
+ let calls=0;globalThis.fetch=async()=>{calls++;throw new Error('unexpected lookup');};
+ for(const change of [{provider:'other'},{source:'exec'},{id:'BAD-ID'},{id:'EMP_ABSENT_SCOPE_TOKEN'}]){const h=await createHarness(plugin,runtime({...binding,...change}));assert.deepEqual(await h.emit('before_dispatch',event,ctx),{handled:true});}
+ assert.equal(calls,0);
+ // An unrelated guild never invokes the new mandatory resolver.
+ const lab=await createHarness(plugin,runtime(binding));assert.equal(await lab.emit('before_dispatch',event,{...ctx,guildId:'444444444444444444',agentId:'lab'}),undefined);assert.equal(calls,0);
+});
