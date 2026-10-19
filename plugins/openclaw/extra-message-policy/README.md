@@ -314,3 +314,27 @@ It rechecks every file hash, takes an exclusive lock and atomically rewrites
 changed JSONL files. A fresh manifest is required if ingestion changed any
 file. This utility does not schedule retention, encrypt storage, process other
 transcripts or backups, or prove complete deletion from those systems.
+
+
+### Mandatory Discord channel scopes
+
+`discordChannelScopes` contains `{accountId, guildId, channelIds, agentIds?}` entries.
+It is an admission boundary before mutable policy rules, commands, raw sinks and
+model dispatch. Exact roots and native parent metadata for their threads are
+admitted. Missing provenance fails closed for protected agents/accounts. Keep
+`includeThreadStarter:false`, `historyLimit:0` and thread parent-session inheritance
+disabled in native configuration. Automatic quote/starter/forward contexts without
+source-channel provenance reject the entire turn conservatively, including reply
+attachments. Media provenance is also flattened, so protected media turns (including
+ordinary attachments) are conservatively rejected. Native Discord preparation can
+already have fetched supplemental media onto the host before these hooks; this
+boundary protects plugin sinks and model dispatch, not that earlier transport fetch.
+Plain user-written text cannot establish transport provenance.
+
+Deploy protected guilds onto a dedicated agent, session store and controlled
+workspace. Disable indexed memory/wiki, filesystem, execution and delegation tools;
+permit only `search_raw_context` for archive access. Both automatic recall and that
+tool enforce mandatory admission independently of caller search filters. Protected
+recall accepts only new records stamped after scope admission; historical mixed
+records are preserved but excluded. This does not delete historical data, provide
+complete sender opt-out, or enforce restrictions on unrelated agents/guilds.

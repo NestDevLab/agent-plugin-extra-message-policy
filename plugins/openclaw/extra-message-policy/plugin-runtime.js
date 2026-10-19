@@ -1,3 +1,5 @@
+import { admitChannelScope, activeChannelScope, scopeRoute } from "./channel-scope.js";
+import { createNativeOptOutGuard } from "./native-optout-guard.js";
 import { mkdir, appendFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -385,7 +387,7 @@ function lookupDiscordRoute(state, event = {}, ctx = {}) {
     routeChannelId(event, ctx) ? `channel:${routeChannelId(event, ctx)}` : ""
   ].filter(Boolean)) {
     const route = state.discordRoutes.get(key);
-    if (route) return route;
+    if (route && (!routeAccountId(event, ctx) || !route.accountId || route.accountId === routeAccountId(event, ctx))) return route;
   }
   return null;
 }
@@ -449,6 +451,7 @@ function rememberDedupe(state, key, windowSize) {
 function toRecord(source, event = {}, ctx = {}, policy = {}) {
   return {
     source,
+    ...(policy.channelScopeAdmission ? { channelScopeAdmission: 1, guildId: routeGuildId(event, ctx), parentChannelId: routeParentChannelId(event, ctx) } : {}),
     observedAt: new Date().toISOString(),
     channelId: ctx.channelId ?? ctx.ChannelId ?? ctx.NativeChannelId ?? event.channelId ?? event.ChannelId ?? event.NativeChannelId ?? event.channel ?? event.from,
     accountId: ctx.accountId ?? ctx.AccountId ?? event.accountId ?? event.AccountId,
@@ -949,8 +952,42 @@ export function registerExtraMessagePolicy(api, options = {}) {
     return isDiscordRoute(event, ctx) && Boolean(accountId && senderId && cfg.privacy.discordOptOut[accountId]?.includes(senderId));
   };
 
+  api.on("before_message_write", createNativeOptOutGuard(cfg.privacy.discordOptOut, cfg.privacy.discordAgentAccounts), { priority: 1000 });
+
+  const checkScope = async (event = {}, ctx = {}) => {
+    const routed = withRememberedDiscordRoute(state, event, ctx);
+    if (!activeChannelScope(cfg.discordChannelScopes, routed.event, routed.ctx)) return { allowed: true, protected: false };
+    const currentConfig = api.runtime?.config?.current?.() || api.config || {};
+    const hydrated = await withHydratedDiscordParent(state, routed.event, routed.ctx, currentConfig, api.logger);
+    const admission = admitChannelScope(cfg.discordChannelScopes, hydrated.event, hydrated.ctx);
+    // Only admitted provenance is retained; a rejected quote must never poison a
+    // later turn's route cache or authorize recall/model execution.
+    if (admission.allowed) rememberDiscordRoute(state, hydrated.event, hydrated.ctx);
+    return admission;
+  };
+
+  api.on("before_tool_call", (event, ctx) => {
+    if (cfg.discordChannelScopes.some(scope => scope.agentIds.includes(scopeRoute({}, ctx).agentId)) && event?.toolName !== "search_raw_context") {
+      return { block: true, blockReason: "Tool is outside the mandatory Discord recall boundary" };
+    }
+  }, { priority: 1000 });
+
+  api.on("before_agent_run", async (event, ctx) => {
+    const admission = await checkScope(event, ctx);
+    if (admission.protected && !admission.allowed) return {
+      outcome: "block", reason: "Discord channel scope could not be verified",
+      message: "Context unavailable for this request."
+    };
+  }, { priority: 1000 });
+
   const resolveEffectiveDecision = async (event = {}, ctx = {}, hook = "unknown") => {
     const routed = withRememberedDiscordRoute(state, event, ctx);
+    const admission = await checkScope(routed.event, routed.ctx);
+    if (!admission.allowed) return {
+      hook, event: routed.event, ctx: routed.ctx,
+      policy: { respond: false, ingestMode: "none", mentionRecall: false, matched: "mandatory:discord-channel-scope" },
+      mentionEvidence: {}, parentLookup: {}
+    };
     if (isDiscordOptedOut(routed.event, routed.ctx)) {
       return {
         hook, event: routed.event, ctx: routed.ctx,
@@ -1020,6 +1057,7 @@ export function registerExtraMessagePolicy(api, options = {}) {
       nativeStatus = null;
     }
     const policy = applyNativeMentionGatePolicy(effectivePolicy, nativeStatus, enriched.event, enriched.ctx);
+    if (admission.protected && admission.allowed) policy.channelScopeAdmission = 1;
     const mentionEvidence = describeMentionEvidence(
       hydrated.event,
       hydrated.ctx,
@@ -1213,6 +1251,7 @@ export function registerExtraMessagePolicy(api, options = {}) {
   });
 
   api.on("inbound_claim", async (event, ctx) => {
+    if (!(await checkScope(event, ctx)).allowed) return { handled: true };
     // inbound_claim runs before command routing and Codex/App Server dispatch.
     if (isPolicyCommand(commandConfig, event, ctx) && !isDiscordOptedOut(event, ctx)) return;
     rememberDiscordRoute(state, event, ctx);
@@ -1230,6 +1269,7 @@ export function registerExtraMessagePolicy(api, options = {}) {
   }, { priority: 1000 });
 
   api.on("message_received", async (event, ctx) => {
+    if (!(await checkScope(event, ctx)).allowed) return;
     if (isPolicyCommand(commandConfig, event, ctx) && !isDiscordOptedOut(event, ctx)) return;
     rememberDiscordRoute(state, event, ctx);
     const decision = await resolveEffectiveDecision(event, ctx, "message_received");
@@ -1238,6 +1278,7 @@ export function registerExtraMessagePolicy(api, options = {}) {
   });
 
   api.on("before_dispatch", async (event, ctx) => {
+    if (!(await checkScope(event, ctx)).allowed) return { handled: true };
     if (isPolicyCommand(commandConfig, event, ctx) && !isDiscordOptedOut(event, ctx)) return;
     rememberDiscordRoute(state, event, ctx);
     const decision = await resolveEffectiveDecision(event, ctx, "before_dispatch");
@@ -1254,6 +1295,9 @@ export function registerExtraMessagePolicy(api, options = {}) {
 
   api.on("reply_dispatch", async (event) => {
     const dispatchCtx = event?.ctx || {};
+    if (!(await checkScope(dispatchCtx, dispatchCtx)).allowed) return {
+      handled: true, queuedFinal: false, counts: { tool: 0, block: 0, final: 0 }
+    };
     if (isPolicyCommand(commandConfig, dispatchPolicyEvent(dispatchCtx), dispatchPolicyContext(dispatchCtx))) return;
     const decision = await resolveEffectiveDecision(dispatchPolicyEvent(dispatchCtx), dispatchPolicyContext(dispatchCtx), "reply_dispatch");
     if (!shouldForceReplyContext(decision.policy)) {

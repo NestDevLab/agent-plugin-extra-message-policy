@@ -1,6 +1,6 @@
 {
   "name": "@nestdevlab/openclaw-plugin-extra-message-policy",
-  "version": "0.1.7",
+  "version": "0.1.9",
   "private": false,
   "type": "module",
   "description": "OpenClaw plugin for cross-platform message ingest, response policy, and zero-embedding raw recall.",
@@ -10,7 +10,7 @@
     ]
   },
   "scripts": {
-    "build": "node --check index.js && node --check discord-sdk-compat.js && node --check plugin-runtime.js && node --check policy.js && node --check policy-audit.js && node --check policy-command.js && node --check native-reply.js && node --check raw-recall.js && node --check retention.js && node --check retention-cli.js && node --check runtime-context.js",
+    "build": "node --check index.js && node --check discord-sdk-compat.js && node --check plugin-runtime.js && node --check policy.js && node --check policy-audit.js && node --check policy-command.js && node --check native-reply.js && node --check raw-recall.js && node --check retention.js && node --check retention-cli.js && node --check runtime-context.js && node --check channel-scope.js && node --check native-optout-guard.js",
     "test": "node --test",
     "test:coverage": "node --test --experimental-test-coverage",
     "lint": "npm run build"
@@ -43,7 +43,9 @@
     "README.md",
     "ROLLOUT.md",
     "examples",
-    "LICENSE"
+    "LICENSE",
+    "channel-scope.js",
+    "native-optout-guard.js"
   ],
   "keywords": [
     "openclaw",

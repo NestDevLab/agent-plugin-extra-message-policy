@@ -1,3 +1,4 @@
+import { normalizeChannelScopes } from "./channel-scope.js";
 import { normalizeRawRecallConfig } from "./raw-recall.js";
 
 export const INGEST_MODES = Object.freeze(["none", "passive", "all", "responseCandidates"]);
@@ -95,7 +96,9 @@ export function normalizeConfig(raw = {}) {
   };
   return {
     enabled: raw.enabled !== false,
+    discordChannelScopes: normalizeChannelScopes(raw.discordChannelScopes),
     privacy: {
+      discordAgentAccounts: raw.privacy?.discordAgentAccounts || {},
       discordOptOut: Object.fromEntries(
         Object.entries(raw.privacy?.discordOptOut || {})
           .filter(([accountId, ids]) => accountId && Array.isArray(ids))
@@ -107,7 +110,7 @@ export function normalizeConfig(raw = {}) {
       ? raw.policies.filter(Boolean).map((rule) => normalizePolicyRule(rule, defaultPolicy))
       : [],
     jsonlSink,
-    rawRecall: normalizeRawRecallConfig(raw.rawRecall || {}, jsonlSink),
+    rawRecall: { ...normalizeRawRecallConfig(raw.rawRecall || {}, jsonlSink), discordChannelScopes: normalizeChannelScopes(raw.discordChannelScopes), discordOptOut: raw.privacy?.discordOptOut || {} },
     httpSink: {
       enabled: raw.httpSink?.enabled === true,
       url: asString(raw.httpSink?.url),
