@@ -968,6 +968,7 @@ export function registerExtraMessagePolicy(api, options = {}) {
     discordRoutes: new Map(),
     discordChannelParents: new Map(),
     scopeRoutes: new Map(),
+    scopeGuilds: new Map(),
     scopeLookups: new Map(),
     traceCounter: 0,
     diagnosticSequence: 0,
@@ -982,14 +983,47 @@ export function registerExtraMessagePolicy(api, options = {}) {
 
   api.on("before_message_write", createNativeOptOutGuard(cfg.privacy.discordOptOut, cfg.privacy.discordAgentAccounts), { priority: 1000 });
 
+  // Classify native provenance synchronously: message_received is fire-and-forget
+  // and a reduced dispatch hook can run before any awaited work completes. This
+  // guild cache never uses legacy model/session parent inference.
+  const classifyScope = (event = {}, ctx = {}) => {
+    const route = scopeRoute(event, ctx);
+    route.guildId ||= routeGuildId(event, ctx);
+    const key = route.accountId && route.channelId ? `${route.accountId}:${route.channelId}` : "";
+    if (key && route.guildId) {
+      state.scopeGuilds.set(key, route.guildId);
+      while (state.scopeGuilds.size > 5000) state.scopeGuilds.delete(state.scopeGuilds.keys().next().value);
+    } else if (key) route.guildId = state.scopeGuilds.get(key) || "";
+    let scope = activeChannelScope(cfg.discordChannelScopes, event, { ...ctx, guildId: route.guildId });
+    if (scope && !route.guildId) {
+      const accountScopes = cfg.discordChannelScopes.filter(item => item.accountId === route.accountId);
+      const identities = [ctx.agentId, ctx.AgentId, event.agentId, event.AgentId,
+        ...[ctx.sessionKey, ctx.SessionKey, event.sessionKey, event.SessionKey]
+          .map(session => typeof session === "string" ? session.match(/^agent:([^:]+):/)?.[1] : "")]
+        .filter(Boolean);
+      const sessions = [ctx.sessionKey, ctx.SessionKey, event.sessionKey, event.SessionKey].filter(Boolean);
+      const consistentChannels = sessions.every(session => {
+        const channelId = typeof session === "string" ? session.match(/:channel:([^:]+)/)?.[1] : "";
+        return !channelId || channelId === route.channelId;
+      });
+      const recognized = Object.hasOwn(api.config?.agents?.entries || {}, route.agentId) ||
+        api.config?.agents?.list?.some(agent => agent.id === route.agentId);
+      // A configured unrelated agent may retain its legacy guildless behavior.
+      // Missing scope identities or conflicting native identities cannot bypass.
+      if (recognized && route.channelId && consistentChannels && identities.length && identities.every(id => id === route.agentId) &&
+          accountScopes.length && accountScopes.every(item => item.agentIds.length && !item.agentIds.includes(route.agentId) && !item.channelIds.includes(route.channelId))) scope = undefined;
+    }
+    return { scope, route };
+  };
+
   // This cache contains only mandatory transport provenance. Legacy response
   // routing may infer parents from model sessions and must never populate it.
   const checkScope = async (event = {}, ctx = {}) => {
-    const scope = activeChannelScope(cfg.discordChannelScopes, event, ctx);
+    const { scope, route } = classifyScope(event, ctx);
     if (!scope) return { allowed: true, protected: false };
-    const route = scopeRoute(event, ctx);
     const denied = { allowed: false, protected: true, scope, route };
-    if (route.accountId !== scope.accountId || !route.channelId ||
+    if ((scope.agentIds.length && !scope.agentIds.includes(route.agentId)) ||
+        route.accountId !== scope.accountId || !route.channelId ||
         (route.guildId && route.guildId !== scope.guildId)) return denied;
     const key = `${scope.accountId}:${scope.guildId}:${route.channelId}`;
     const cached = state.scopeRoutes.get(key);
@@ -1334,6 +1368,8 @@ export function registerExtraMessagePolicy(api, options = {}) {
   }, { priority: 1000 });
 
   api.on("message_received", async (event, ctx) => {
+    const classification = classifyScope(event, ctx);
+    if (!classification.scope && routeGuildId(event, ctx)) rememberDiscordRoute(state, event, ctx);
     if (!(await checkScope(event, ctx)).allowed) return;
     if (isPolicyCommand(commandConfig, event, ctx) && !isDiscordOptedOut(event, ctx)) return;
     rememberDiscordRoute(state, event, ctx);

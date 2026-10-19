@@ -2547,3 +2547,59 @@ test('mandatory metadata lookup fails closed on identity/guild/type/parent error
  // An unrelated guild never invokes the new mandatory resolver.
  const lab=await createHarness(plugin,runtime(binding));assert.equal(await lab.emit('before_dispatch',event,{...ctx,guildId:'444444444444444444',agentId:'lab'}),undefined);assert.equal(calls,0);
 });
+
+test('fire-and-forget Lab received preserves synchronous legacy routing for reduced dispatch',async()=>{
+ const accountId='public',guildId='444444444444444444',channelId='555555555555555555';
+ const plugin={defaultPolicy:{respond:false,ingestMode:'none'},policies:[{guildId,channelId,respond:true,ingestMode:'none'}],discordChannelScopes:[{accountId,guildId:'111111111111111111',channelIds:['222222222222222222'],agentIds:['isolated']}]};
+ const ctx={accountId,channelId:'discord',conversationId:channelId,agentId:'lab',sessionKey:`agent:lab:discord:channel:${channelId}`};
+ for(const scoped of [false,true]) for(const runtime of [{},{agents:{entries:{lab:{}}}}]){
+  const harness=await createHarness({...plugin,discordChannelScopes:scoped?plugin.discordChannelScopes:[]},runtime);
+  const received=harness.emit('message_received',{content:'normal',messageId:'lab-native',metadata:{guildId}},ctx);
+  assert.equal(await harness.emit('before_dispatch',{content:'normal',messageId:'lab-native'},ctx),undefined,`scoped=${scoped}`);
+  await received;
+ }
+});
+
+test('uncached recognized guildless Lab dispatch matches unscoped baseline without rewriting context',async()=>{
+ const accountId='public',channelId='555555555555555555';
+ const scope={accountId,guildId:'111111111111111111',channelIds:['222222222222222222'],agentIds:['isolated']};
+ const ctx={accountId,channelId:'discord',conversationId:channelId,agentId:'lab',sessionKey:`agent:lab:discord:channel:${channelId}`};
+ for(const agents of [{entries:{lab:{}}},{list:[{id:'lab'}]}]) for(const respond of [false,true]){
+  const config={defaultPolicy:{respond,ingestMode:'none'}};
+  const baseline=await createHarness(config,{agents});
+  const scoped=await createHarness({...config,discordChannelScopes:[scope]},{agents});
+  assert.deepEqual(await scoped.emit('before_dispatch',{content:'normal'},ctx),await baseline.emit('before_dispatch',{content:'normal'},ctx));
+ }
+});
+
+test('guildless scope classification fails closed for unknown or inconsistent identities',async()=>{
+ const accountId='public',channelId='555555555555555555';
+ const scope={accountId,guildId:'111111111111111111',channelIds:['222222222222222222'],agentIds:['isolated']};
+ const ctx={accountId,channelId:'discord',conversationId:channelId,agentId:'lab',sessionKey:`agent:lab:discord:channel:${channelId}`};
+ const config={defaultPolicy:{respond:true,ingestMode:'none'},discordChannelScopes:[scope]};
+ const runtime={agents:{entries:{lab:{},isolated:{}}}};
+ for(const change of [{agentId:'unknown',sessionKey:`agent:unknown:discord:channel:${channelId}`},{agentId:undefined,sessionKey:undefined},{sessionKey:`agent:isolated:discord:channel:${channelId}`},{sessionKey:'agent:lab:discord:channel:666666666666666666'},{agentId:'toString',sessionKey:`agent:toString:discord:channel:${channelId}`}]){
+  const h=await createHarness(config,runtime);assert.deepEqual(await h.emit('before_dispatch',{content:'normal'},{...ctx,...change}),{handled:true});
+ }
+ const noIds=await createHarness({...config,discordChannelScopes:[{...scope,agentIds:[]}]},runtime);
+ assert.deepEqual(await noIds.emit('before_dispatch',{content:'normal'},ctx),{handled:true});
+ const wrongAgent=await createHarness(config,runtime);
+ assert.deepEqual(await wrongAgent.emit('before_dispatch',{content:'normal',metadata:{guildId:scope.guildId}},{...ctx,conversationId:scope.channelIds[0]}),{handled:true});
+ const wrongAccount=await createHarness(config,runtime);
+ const isolated={...ctx,agentId:'isolated',sessionKey:`agent:isolated:discord:channel:${channelId}`,accountId:'other'};
+ assert.deepEqual(await wrongAccount.emit('before_dispatch',{content:'normal'},isolated),{handled:true});
+});
+
+
+test('trusted guild classification is account-local and known protected roots reject wrong agents',async()=>{
+ const accountId='public',guildId='111111111111111111',rootId='222222222222222222',channelId='555555555555555555';
+ const config={defaultPolicy:{respond:true,ingestMode:'none'},discordChannelScopes:[{accountId,guildId,channelIds:[rootId],agentIds:['isolated']}]};
+ const harness=await createHarness(config,{agents:{entries:{lab:{}}}});
+ const ctx={accountId,channelId:'discord',conversationId:channelId,agentId:'lab',sessionKey:`agent:lab:discord:channel:${channelId}`};
+ await harness.emit('message_received',{content:'lab',metadata:{guildId:'444444444444444444'}},{...ctx,accountId:'other'});
+ // Neither another account's native classification nor a registered Lab identity
+ // can override the protected account's explicit root or protected guild.
+ assert.deepEqual(await harness.emit('before_dispatch',{content:'normal'},{...ctx,agentId:'unknown',sessionKey:`agent:unknown:discord:channel:${channelId}`}),{handled:true});
+ assert.deepEqual(await harness.emit('before_dispatch',{content:'normal'},{...ctx,conversationId:rootId,sessionKey:`agent:lab:discord:channel:${rootId}`}),{handled:true});
+ assert.deepEqual(await harness.emit('before_dispatch',{content:'normal',metadata:{guildId}},{...ctx,conversationId:rootId,sessionKey:`agent:lab:discord:channel:${rootId}`}),{handled:true});
+});
