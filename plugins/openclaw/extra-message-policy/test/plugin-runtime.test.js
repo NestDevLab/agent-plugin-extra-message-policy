@@ -2411,3 +2411,56 @@ test("Discord opt-out overrides channel and runtime ingestion for its account on
   });
   assert.equal((await readJsonl(jsonlPath)).length, 1);
 });
+
+test('mandatory scope runs before command bypasses, sinks and model/reply dispatch', async () => {
+  const accountId='public', guildId='111111111111111111', rootId='222222222222222222';
+  const sink = path.join(await mkdtemp(path.join(os.tmpdir(),'scope-sink-')),'messages.jsonl');
+  const harness = await createHarness({
+    defaultPolicy:{respond:true,ingestMode:'all'},
+    discordChannelScopes:[{accountId,guildId,channelIds:[rootId],agentIds:['isolated']}],
+    jsonlSink:{enabled:true,path:sink}
+  });
+  const route = {accountId,guildId,channelId:rootId,conversationId:`channel:${rootId}`,sessionKey:`agent:isolated:discord:channel:${rootId}`,agentId:'isolated'};
+  const allowed = {messageId:'allow',content:'local text',metadata:{guildId}};
+  assert.equal(await harness.emit('inbound_claim',allowed,route),undefined);
+  await harness.emit('message_received',allowed,route);
+  const rows = await readJsonl(sink);
+  assert.equal(rows.length,1);assert.equal(rows[0].channelScopeAdmission,1);assert.equal(rows[0].guildId,guildId);
+  for(const change of [{channelId:'333333333333333333'},{content:'/policy status',replyToId:'x'},{content:'/help',media:[{}]},{content:'[Forwarded message]\nsecret'},{ThreadStarterBody:'secret'}]) {
+    const event={...allowed,...change,messageId:JSON.stringify(change)};
+    const ctx={...route,...('channelId' in change?{channelId:change.channelId,conversationId:`channel:${change.channelId}`}:{})};
+    for(const hook of ['inbound_claim','before_dispatch']) assert.deepEqual(await harness.emit(hook,event,ctx),{handled:true},hook+JSON.stringify(change));
+    await harness.emit('message_received',event,ctx);
+  }
+  assert.equal((await readJsonl(sink)).length,1);
+  const dispatched=await harness.emit('reply_dispatch',{ctx:{AccountId:accountId,GroupSpace:guildId,NativeChannelId:rootId,ReplyToId:'x'}});
+  assert.equal(dispatched.handled,true);
+  assert.equal((await harness.emit('before_agent_run',{accountId,channelId:'333333333333333333'},{agentId:'isolated'})).outcome,'block');
+  // Same account in a different guild remains governed by its previous rules.
+  assert.equal(await harness.emit('inbound_claim',{content:'normal'}, {...route,guildId:'444444444444444444',agentId:'cclab',sessionKey:'unrelated'}),undefined);
+});
+test('protected agent tool hook blocks alternate memory and file paths',async()=>{
+  const harness=await createHarness({discordChannelScopes:[{accountId:'public',guildId:'111111111111111111',channelIds:['222222222222222222'],agentIds:['isolated']}]});
+  for(const toolName of ['read','exec','memory_search','wiki_get','sessions_send','future_unsafe_tool']) assert.equal((await harness.emit('before_tool_call',{toolName},{agentId:'isolated'})).block,true);
+  assert.equal(await harness.emit('before_tool_call',{toolName:'search_raw_context'},{agentId:'isolated'}),undefined);
+  assert.equal(await harness.emit('before_tool_call',{toolName:'read'},{agentId:'cclab'}),undefined);
+});
+test('native provider contexts retain numeric sink provenance and support later model routing',async()=>{
+ const accountId='public',guildId='111111111111111111',channelId='222222222222222222',threadId='333333333333333333';
+ const sink=path.join(await mkdtemp(path.join(os.tmpdir(),'native-scope-')),'messages.jsonl');
+ const harness=await createHarness({defaultPolicy:{respond:true,ingestMode:'all'},jsonlSink:{enabled:true,path:sink},discordChannelScopes:[{accountId,guildId,channelIds:[channelId],agentIds:['isolated']}]});
+ for(const [id,parent] of [[channelId,undefined],[threadId,channelId]]) {
+  const sessionKey=`agent:isolated:discord:channel:${id}`;
+  const event={messageId:id,content:'admitted local message',metadata:{guildId,parentChannelId:parent}};
+  const ctx={accountId,channelId:'discord',conversationId:`channel:${id}`,sessionKey,agentId:'isolated'};
+  assert.equal(await harness.emit('inbound_claim',event,ctx),undefined);
+  await harness.emit('message_received',event,ctx);
+  assert.equal(await harness.emit('before_agent_run',{accountId,channelId:id,prompt:'local'}, {agentId:'isolated',accountId,channelId:id,sessionKey}),undefined);
+ }
+ const rows=await readJsonl(sink);assert.deepEqual(rows.map(x=>x.channelId),[channelId,threadId]);
+ assert.equal(rows[1].parentChannelId,channelId);
+ const lab={accountId,guildId:'444444444444444444',channelId:'555555555555555555',agentId:'lab',sessionKey:'agent:lab:discord:channel:555555555555555555'};
+ assert.equal(await harness.emit('inbound_claim',{content:'normal'},lab),undefined);
+ assert.equal(await harness.emit('before_agent_run',{accountId,channelId:lab.channelId},{...lab,guildId:undefined}),undefined);
+ assert.equal((await harness.emit('before_agent_run',{accountId:'other',channelId},{agentId:'isolated',sessionKey:`agent:isolated:discord:channel:${channelId}`})).outcome,'block');
+});

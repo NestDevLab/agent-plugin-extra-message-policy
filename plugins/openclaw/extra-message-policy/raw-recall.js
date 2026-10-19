@@ -1,3 +1,4 @@
+import { admittedRecallRecord } from "./channel-scope.js";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
@@ -38,7 +39,9 @@ export function normalizeRawRecallConfig(raw = {}, jsonlSink = {}) {
 export function buildRawRecallGuidance(cfg) {
   if (!cfg?.enabled || !cfg?.appendGuidance) return "";
   const root = cfg.rootPath || "memory/discord/raw";
-  const toolLine = cfg.tool?.enabled === false
+  const toolLine = cfg.discordChannelScopes?.length
+    ? "Use only search_raw_context for archive recall; direct file access and other memory sources are not authorized by this scope."
+    : cfg.tool?.enabled === false
     ? "If more detail is needed and file tools are available, inspect the relevant JSONL shards directly before answering."
     : "If more detail is needed, use the search_raw_context tool to query the archive on demand before answering.";
   return [
@@ -233,7 +236,7 @@ export async function searchRawContext(options, cfg, ctx = {}) {
     const lines = text.split("\n").filter(Boolean);
     for (const line of lines) {
       const record = parseJsonLine(line);
-      if (!record || !recordMatchesFilters(record, filters)) continue;
+      if (!record || !admittedRecallRecord(record, cfg.discordChannelScopes, ctx, cfg.discordOptOut) || !recordMatchesFilters(record, filters)) continue;
       const score = scoreRecord(record, terms, currentConversationId);
       if (score <= 0) continue;
       matches.push({ score, file, record });

@@ -189,3 +189,27 @@ test("raw recall file listing covers direct files, legacy files, walking, caps, 
     await rm(tmp, { recursive: true, force: true });
   }
 });
+
+test('protected automatic and tool recall cannot broaden mandatory admission via search options', async () => {
+  const tmp = await mkdtemp(path.join(os.tmpdir(),'scoped-recall-'));
+  try {
+    const base = {accountId:'public',guildId:'100',channelId:'200',content:'Phoenix verified context',channelScopeAdmission:1};
+    await writeFile(path.join(tmp,'messages.jsonl'),[
+      base, {...base,channelId:'999',content:'Phoenix outside secret'},
+      {...base,channelScopeAdmission:undefined,content:'Phoenix legacy mixed'},
+      {...base,accountId:'other',content:'Phoenix another account'},
+      {...base,channelId:'300',parentChannelId:'201',content:'Phoenix admitted post'},
+      {...base,ReplyToId:'1',content:'Phoenix quote secret'}
+    ].map(x=>JSON.stringify(x)).join('\n'));
+    const cfg = {...normalizeRawRecallConfig({rootPath:tmp,searchOnTriggerOnly:false}),discordChannelScopes:[{accountId:'public',guildId:'100',channelIds:['200','201'],agentIds:['isolated']}]};
+    const ctx = {agentId:'isolated'};
+    const automatic = await searchRawRecall('Phoenix context',cfg,ctx);
+    assert.match(automatic,/verified context/);assert.match(automatic,/admitted post/);
+    assert.doesNotMatch(automatic,/secret|legacy|another account/);
+    const tool = createRawContextSearchTool(cfg,ctx);
+    const broadened = await tool.execute('1',{query:'Phoenix',daysBack:0,channelId:'999'});
+    assert.equal(broadened.details.matches.length,0);
+    const normal = await tool.execute('2',{query:'Phoenix',daysBack:0});
+    assert.equal(normal.details.matches.length,2);
+  } finally {await rm(tmp,{recursive:true,force:true});}
+});
